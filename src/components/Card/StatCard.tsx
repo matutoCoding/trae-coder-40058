@@ -1,5 +1,6 @@
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 interface StatCardProps {
   title: string
@@ -9,6 +10,7 @@ interface StatCardProps {
   trend?: number
   trendLabel?: string
   color?: 'blue' | 'green' | 'orange' | 'purple'
+  children?: ReactNode
 }
 
 const colorMap = {
@@ -42,6 +44,7 @@ export default function StatCard({
   trend,
   trendLabel,
   color = 'blue',
+  children,
 }: StatCardProps) {
   const colors = colorMap[color]
   const trendUp = trend !== undefined && trend >= 0
@@ -68,6 +71,7 @@ export default function StatCard({
               {trendLabel && <span className="text-xs text-gray-400">{trendLabel}</span>}
             </div>
           )}
+          {children}
         </div>
         <div className={`w-12 h-12 rounded-xl ${colors.iconBg} flex items-center justify-center ml-3`}>
           <Icon className={`w-6 h-6 ${colors.iconColor}`} />

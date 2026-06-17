@@ -8,6 +8,8 @@ import type {
   AppearanceInspection,
   PhysicalInspection,
   EnergyStatistics,
+  EnergyTarget,
+  DefectHandlingRecord,
 } from '../types'
 import {
   mockSemiFinished,
@@ -22,6 +24,12 @@ import {
 
 const STORAGE_KEY = 'vulcanization_store_v1'
 
+const defaultEnergyTargets: Record<string, EnergyTarget> = {
+  day: { period: 'day', electricity: 1500, steam: 10, water: 15, totalCost: 2500 },
+  week: { period: 'week', electricity: 9000, steam: 60, water: 90, totalCost: 14000 },
+  month: { period: 'month', electricity: 38000, steam: 250, water: 380, totalCost: 58000 },
+}
+
 interface VulcanizationStore {
   semiFinished: SemiFinished[]
   molds: Mold[]
@@ -31,6 +39,8 @@ interface VulcanizationStore {
   appearanceInspection: AppearanceInspection[]
   physicalInspection: PhysicalInspection[]
   energyStatistics: EnergyStatistics[]
+  energyTargets: Record<string, EnergyTarget>
+  defectHandlings: DefectHandlingRecord[]
 
   addSemiFinished: (item: SemiFinished) => void
   addMold: (item: Mold) => void
@@ -43,6 +53,8 @@ interface VulcanizationStore {
   addAppearanceInspection: (item: AppearanceInspection) => void
   addPhysicalInspection: (item: PhysicalInspection) => void
   addEnergyStatistics: (item: EnergyStatistics) => void
+  addDefectHandling: (item: DefectHandlingRecord) => void
+  updateEnergyTarget: (period: 'day' | 'week' | 'month', target: Partial<EnergyTarget>) => void
 
   getAvailableSemiFinishedForVulcanization: () => SemiFinished[]
   getCompletedVulcanizationForDemolding: (type: 'plate' | 'tank') => (PlateVulcanization | TankVulcanization)[]
@@ -65,6 +77,8 @@ interface VulcanizationStore {
     timestamp: string
     details: Record<string, unknown>
   }>
+  getDefectHandlingByBatchId: (batchId: string) => DefectHandlingRecord[]
+  getDefectHandlingBySourceId: (sourceId: string) => DefectHandlingRecord | undefined
   resetToMock: () => void
 }
 
@@ -80,6 +94,8 @@ const loadFromStorage = (): Partial<{
   appearanceInspection: AppearanceInspection[]
   physicalInspection: PhysicalInspection[]
   energyStatistics: EnergyStatistics[]
+  energyTargets: Record<string, EnergyTarget>
+  defectHandlings: DefectHandlingRecord[]
 }> | null => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -103,6 +119,8 @@ const saveToStorage = (state: Partial<VulcanizationStore>) => {
       appearanceInspection: state.appearanceInspection,
       physicalInspection: state.physicalInspection,
       energyStatistics: state.energyStatistics,
+      energyTargets: state.energyTargets,
+      defectHandlings: state.defectHandlings,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
   } catch (e) {
@@ -122,6 +140,8 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
     appearanceInspection: persisted.appearanceInspection ?? mockAppearanceInspection,
     physicalInspection: persisted.physicalInspection ?? mockPhysicalInspection,
     energyStatistics: persisted.energyStatistics ?? mockEnergyStatistics,
+    energyTargets: persisted.energyTargets ?? defaultEnergyTargets,
+    defectHandlings: persisted.defectHandlings ?? [],
   } : {
     semiFinished: mockSemiFinished,
     molds: mockMolds,
@@ -131,6 +151,8 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
     appearanceInspection: mockAppearanceInspection,
     physicalInspection: mockPhysicalInspection,
     energyStatistics: mockEnergyStatistics,
+    energyTargets: defaultEnergyTargets,
+    defectHandlings: [],
   }
 
   const persistMiddleware = (newState: Partial<VulcanizationStore>) => {
@@ -231,9 +253,28 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
       persistMiddleware(newState)
     },
 
+    addDefectHandling: (item) => {
+      const newItem = { ...item, id: generateId('dh') }
+      const newState = { defectHandlings: [newItem, ...get().defectHandlings] }
+      set(newState)
+      persistMiddleware(newState)
+    },
+
     addEnergyStatistics: (item) => {
       const newItem = { ...item, id: generateId('e') }
       const newState = { energyStatistics: [newItem, ...get().energyStatistics] }
+      set(newState)
+      persistMiddleware(newState)
+    },
+
+    updateEnergyTarget: (period, target) => {
+      const current = get().energyTargets[period]
+      const newState = {
+        energyTargets: {
+          ...get().energyTargets,
+          [period]: { ...current, ...target, period },
+        },
+      }
       set(newState)
       persistMiddleware(newState)
     },
@@ -291,6 +332,16 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
         const vulc = state.tankVulcanization.find((t) => t.id === demold.vulcanizationId)
         return vulc?.semiFinishedId ?? null
       }
+    },
+
+    getDefectHandlingByBatchId: (batchId) => {
+      const state = get()
+      return state.defectHandlings.filter((d) => d.batchId === batchId)
+    },
+
+    getDefectHandlingBySourceId: (sourceId) => {
+      const state = get()
+      return state.defectHandlings.find((d) => d.sourceRecordId === sourceId)
     },
 
     getRunningVulcanizationBatches: () => {
@@ -415,7 +466,9 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
         demolding: mockDemolding,
         appearanceInspection: mockAppearanceInspection,
         physicalInspection: mockPhysicalInspection,
+        defectHandlings: [],
         energyStatistics: mockEnergyStatistics,
+        energyTargets: defaultEnergyTargets,
       })
     },
   }

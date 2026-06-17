@@ -84,9 +84,28 @@ export interface PhysicalInspection {
   inspectTime: string
 }
 
+export interface DefectHandlingRecord {
+  id: string
+  batchId: string
+  sourceType: 'appearance' | 'physical'
+  sourceRecordId: string
+  handlingType: 'rework' | 'scrap' | 'concession'
+  conclusion: string
+  handler: string
+  createTime: string
+}
+
 export interface EnergyStatistics {
   id: string
   statDate: string
+  electricity: number
+  steam: number
+  water: number
+  totalCost: number
+}
+
+export interface EnergyTarget {
+  period: 'day' | 'week' | 'month'
   electricity: number
   steam: number
   water: number

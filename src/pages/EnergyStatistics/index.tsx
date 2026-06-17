@@ -11,6 +11,9 @@ import {
   PieChart as PieChartIcon,
   BarChart3,
   Download,
+  Settings,
+  Eye,
+  AlertCircle,
 } from 'lucide-react'
 import {
   LineChart,
@@ -26,12 +29,14 @@ import {
   Cell,
   BarChart,
   Bar,
+  ReferenceLine,
 } from 'recharts'
 import StatCard from '@/components/Card/StatCard'
 import PageHeader from '@/components/Form/PageHeader'
 import DataTable, { type Column } from '@/components/Table/DataTable'
+import StatusBadge from '@/components/Card/StatusBadge'
 import { useVulcanizationStore } from '@/store'
-import type { EnergyStatistics } from '@/types'
+import type { EnergyStatistics, EnergyTarget } from '@/types'
 
 const ELECTRICITY_PRICE = 0.8
 const STEAM_PRICE = 200
@@ -50,6 +55,13 @@ interface FormState {
   water: string
 }
 
+interface TargetFormState {
+  electricity: string
+  steam: string
+  water: string
+  totalCost: string
+}
+
 interface AggregatedData {
   id?: string
   statDate: string
@@ -58,6 +70,7 @@ interface AggregatedData {
   water: number
   totalCost: number
   sortKey: string
+  isOverTarget?: boolean
 }
 
 interface CostBreakdown {
@@ -201,20 +214,91 @@ const getPeriodTitle = (period: PeriodType) => {
   }
 }
 
+const getProgressColor = (progress: number) => {
+  if (progress < 0.8) return 'bg-emerald-500'
+  if (progress <= 1) return 'bg-amber-500'
+  return 'bg-red-500'
+}
+
+const getProgressBgColor = (progress: number) => {
+  if (progress < 0.8) return 'bg-emerald-100'
+  if (progress <= 1) return 'bg-amber-100'
+  return 'bg-red-100'
+}
+
+interface TargetProgressProps {
+  current: number
+  target: number
+  unit: string
+}
+
+function TargetProgress({ current, target, unit }: TargetProgressProps) {
+  const progress = target > 0 ? current / target : 0
+  const displayProgress = Math.min(progress, 1) * 100
+  const isOver = progress > 1
+  const barColor = getProgressColor(progress)
+  const bgColor = getProgressBgColor(progress)
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-xs mb-1">
+        <span className="text-gray-500">目标: {target.toLocaleString()} {unit}</span>
+        {isOver && (
+          <span className="text-red-600 font-medium flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            超标
+          </span>
+        )}
+      </div>
+      <div className={`h-2 rounded-full ${bgColor} overflow-hidden`}>
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${displayProgress}%` }}
+        />
+      </div>
+      <div className="text-right text-xs text-gray-500 mt-1">
+        完成率: {(progress * 100).toFixed(1)}%
+      </div>
+    </div>
+  )
+}
+
 export default function EnergyStatisticsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isTargetModalOpen, setIsTargetModalOpen] = useState(false)
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<AggregatedData | null>(null)
   const [formState, setFormState] = useState<FormState>(initialFormState)
+  const [targetFormState, setTargetFormState] = useState<TargetFormState>({
+    electricity: '',
+    steam: '',
+    water: '',
+    totalCost: '',
+  })
   const [period, setPeriod] = useState<PeriodType>('day')
   const [chartView, setChartView] = useState<ChartViewType>('overview')
   const [listView, setListView] = useState<ListViewType>('summary')
 
   const energyStatistics = useVulcanizationStore((state) => state.energyStatistics)
+  const energyTargets = useVulcanizationStore((state) => state.energyTargets)
   const addEnergyStatistics = useVulcanizationStore((state) => state.addEnergyStatistics)
+  const updateEnergyTarget = useVulcanizationStore((state) => state.updateEnergyTarget)
+
+  const currentTarget = useMemo(() => {
+    return energyTargets[period] as EnergyTarget
+  }, [energyTargets, period])
 
   const aggregatedData = useMemo(
     () => aggregateData(energyStatistics, period),
     [energyStatistics, period]
   )
+
+  const dataWithTargetStatus = useMemo(() => {
+    return aggregatedData.map((item) => ({
+      ...item,
+      isOverTarget: item.totalCost > currentTarget.totalCost,
+    }))
+  }, [aggregatedData, currentTarget.totalCost])
 
   useEffect(() => {
     if (aggregatedData.length > 0) {
@@ -244,8 +328,8 @@ export default function EnergyStatisticsPage() {
   }, [aggregatedData])
 
   const sortedAggregated = useMemo(
-    () => [...aggregatedData].sort((a, b) => b.sortKey.localeCompare(a.sortKey)),
-    [aggregatedData]
+    () => [...dataWithTargetStatus].sort((a, b) => b.sortKey.localeCompare(a.sortKey)),
+    [dataWithTargetStatus]
   )
 
   const currentPeriodData = useMemo(() => {
@@ -277,25 +361,38 @@ export default function EnergyStatisticsPage() {
   }
 
   const trendData = useMemo(() => {
-    return aggregatedData.map((e) => ({
+    return dataWithTargetStatus.map((e) => ({
       date: e.statDate,
       电耗: e.electricity,
       蒸汽耗: e.steam,
       水耗: e.water,
+      isOverTarget: e.isOverTarget,
     }))
-  }, [aggregatedData])
+  }, [dataWithTargetStatus])
 
   const electricTrendData = useMemo(() => {
-    return aggregatedData.map((e) => ({ date: e.statDate, 电耗: e.electricity }))
-  }, [aggregatedData])
+    return dataWithTargetStatus.map((e) => ({
+      date: e.statDate,
+      电耗: e.electricity,
+      isOver: e.electricity > currentTarget.electricity,
+    }))
+  }, [dataWithTargetStatus, currentTarget.electricity])
 
   const steamTrendData = useMemo(() => {
-    return aggregatedData.map((e) => ({ date: e.statDate, 蒸汽耗: e.steam }))
-  }, [aggregatedData])
+    return dataWithTargetStatus.map((e) => ({
+      date: e.statDate,
+      蒸汽耗: e.steam,
+      isOver: e.steam > currentTarget.steam,
+    }))
+  }, [dataWithTargetStatus, currentTarget.steam])
 
   const waterTrendData = useMemo(() => {
-    return aggregatedData.map((e) => ({ date: e.statDate, 水耗: e.water }))
-  }, [aggregatedData])
+    return dataWithTargetStatus.map((e) => ({
+      date: e.statDate,
+      水耗: e.water,
+      isOver: e.water > currentTarget.water,
+    }))
+  }, [dataWithTargetStatus, currentTarget.water])
 
   const pieData = useMemo(() => {
     const totalElectricCost = aggregatedData.reduce(
@@ -318,21 +415,52 @@ export default function EnergyStatisticsPage() {
   }, [aggregatedData])
 
   const barData = useMemo(() => {
-    return aggregatedData.map((e) => {
+    return dataWithTargetStatus.map((e) => {
       const cost = calcCostBreakdown(e.electricity, e.steam, e.water)
       return {
         date: e.statDate,
         电费: Number(cost.electricCost.toFixed(2)),
         蒸汽费: Number(cost.steamCost.toFixed(2)),
         水费: Number(cost.waterCost.toFixed(2)),
+        总费用: Number(cost.total.toFixed(2)),
+        isOverTarget: e.isOverTarget,
       }
     })
-  }, [aggregatedData])
+  }, [dataWithTargetStatus])
 
   const periodTitle = getPeriodTitle(period)
 
   const handleInputChange = (field: keyof FormState, value: string) => {
     setFormState((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleTargetInputChange = (field: keyof TargetFormState, value: string) => {
+    setTargetFormState((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleOpenTargetModal = () => {
+    setTargetFormState({
+      electricity: String(currentTarget.electricity),
+      steam: String(currentTarget.steam),
+      water: String(currentTarget.water),
+      totalCost: String(currentTarget.totalCost),
+    })
+    setIsTargetModalOpen(true)
+  }
+
+  const handleSaveTarget = () => {
+    const electricity = Number(targetFormState.electricity)
+    const steam = Number(targetFormState.steam)
+    const water = Number(targetFormState.water)
+    const totalCost = Number(targetFormState.totalCost)
+
+    if (isNaN(electricity) || isNaN(steam) || isNaN(water) || isNaN(totalCost)) {
+      alert('请输入有效的数值')
+      return
+    }
+
+    updateEnergyTarget(period, { electricity, steam, water, totalCost })
+    setIsTargetModalOpen(false)
   }
 
   const handleSubmit = () => {
@@ -371,6 +499,11 @@ export default function EnergyStatisticsPage() {
     setIsModalOpen(false)
   }
 
+  const handleViewDetail = (record: AggregatedData) => {
+    setSelectedRecord(record)
+    setIsDetailModalOpen(true)
+  }
+
   const getExportFileName = () => {
     const now = new Date()
     const y = now.getFullYear()
@@ -393,19 +526,21 @@ export default function EnergyStatisticsPage() {
     let rows = ''
 
     if (listView === 'summary') {
-      header = '统计周期,电耗(kWh),蒸汽耗(t),水耗(t),总费用(元)\n'
+      header = '统计周期,电耗(kWh),蒸汽耗(t),水耗(t),总费用(元),是否达标\n'
       rows = sortedAggregated
         .map((e) => {
           const cost = calcCostBreakdown(e.electricity, e.steam, e.water)
-          return `${e.statDate},${e.electricity.toFixed(1)},${e.steam.toFixed(1)},${e.water.toFixed(1)},${cost.total.toFixed(1)}`
+          const status = e.isOverTarget ? '超标' : '达标'
+          return `${e.statDate},${e.electricity.toFixed(1)},${e.steam.toFixed(1)},${e.water.toFixed(1)},${cost.total.toFixed(1)},${status}`
         })
         .join('\n')
     } else {
-      header = '统计周期,电耗(kWh),电费(元),蒸汽耗(t),蒸汽费(元),水耗(t),水费(元),总费用(元)\n'
+      header = '统计周期,电耗(kWh),电费(元),蒸汽耗(t),蒸汽费(元),水耗(t),水费(元),总费用(元),是否达标\n'
       rows = sortedAggregated
         .map((e) => {
           const cost = calcCostBreakdown(e.electricity, e.steam, e.water)
-          return `${e.statDate},${e.electricity.toFixed(1)},${cost.electricCost.toFixed(1)},${e.steam.toFixed(1)},${cost.steamCost.toFixed(1)},${e.water.toFixed(1)},${cost.waterCost.toFixed(1)},${cost.total.toFixed(1)}`
+          const status = e.isOverTarget ? '超标' : '达标'
+          return `${e.statDate},${e.electricity.toFixed(1)},${cost.electricCost.toFixed(1)},${e.steam.toFixed(1)},${cost.steamCost.toFixed(1)},${e.water.toFixed(1)},${cost.waterCost.toFixed(1)},${cost.total.toFixed(1)},${status}`
         })
         .join('\n')
     }
@@ -428,7 +563,16 @@ export default function EnergyStatisticsPage() {
     return calcCostBreakdown(e, s, w)
   }, [formState])
 
-  const summaryColumns: Column<AggregatedData>[] = [
+  const detailChartData = useMemo(() => {
+    if (!selectedRecord) return []
+    return [
+      { name: '电耗', 实际: selectedRecord.electricity, 目标: currentTarget.electricity, unit: 'kWh' },
+      { name: '蒸汽耗', 实际: selectedRecord.steam, 目标: currentTarget.steam, unit: 't' },
+      { name: '水耗', 实际: selectedRecord.water, 目标: currentTarget.water, unit: 't' },
+    ]
+  }, [selectedRecord, currentTarget])
+
+  const summaryColumns: Column<AggregatedData & { isOverTarget?: boolean }>[] = [
     { key: 'statDate', title: '统计周期', width: '180px', align: 'center' },
     {
       key: 'electricity',
@@ -471,9 +615,36 @@ export default function EnergyStatisticsPage() {
         )
       },
     },
+    {
+      key: 'status',
+      title: '是否达标',
+      width: '100px',
+      align: 'center',
+      render: (row) => (
+        <StatusBadge
+          status={row.isOverTarget ? 'fail' : 'pass'}
+          text={row.isOverTarget ? '超标' : '达标'}
+        />
+      ),
+    },
+    {
+      key: 'action',
+      title: '操作',
+      width: '100px',
+      align: 'center',
+      render: (row) => (
+        <button
+          onClick={() => handleViewDetail(row)}
+          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#1e3a5f] hover:bg-[#1e3a5f]/10 rounded-md transition-colors"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          详情
+        </button>
+      ),
+    },
   ]
 
-  const detailColumns: Column<AggregatedData>[] = [
+  const detailColumns: Column<AggregatedData & { isOverTarget?: boolean }>[] = [
     { key: 'statDate', title: '统计周期', width: '180px', align: 'center' },
     {
       key: 'electricity',
@@ -558,6 +729,33 @@ export default function EnergyStatisticsPage() {
         )
       },
     },
+    {
+      key: 'status',
+      title: '是否达标',
+      width: '100px',
+      align: 'center',
+      render: (row) => (
+        <StatusBadge
+          status={row.isOverTarget ? 'fail' : 'pass'}
+          text={row.isOverTarget ? '超标' : '达标'}
+        />
+      ),
+    },
+    {
+      key: 'action',
+      title: '操作',
+      width: '100px',
+      align: 'center',
+      render: (row) => (
+        <button
+          onClick={() => handleViewDetail(row)}
+          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#1e3a5f] hover:bg-[#1e3a5f]/10 rounded-md transition-colors"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          详情
+        </button>
+      ),
+    },
   ]
 
   const columns = listView === 'summary' ? summaryColumns : detailColumns
@@ -585,6 +783,18 @@ export default function EnergyStatisticsPage() {
       ? `共${aggregatedData.length}周`
       : `共${aggregatedData.length}月`
 
+  const CustomDot = (props: Record<string, unknown>) => {
+    const { cx, cy, stroke, payload } = props as { cx: number; cy: number; stroke: string; payload?: { isOver?: boolean; isOverTarget?: boolean } }
+    if (payload?.isOver || payload?.isOverTarget) {
+      return (
+        <circle cx={cx} cy={cy} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
+      )
+    }
+    return (
+      <circle cx={cx} cy={cy} r={4} fill={stroke} strokeWidth={2} />
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="p-6 space-y-6">
@@ -608,6 +818,13 @@ export default function EnergyStatisticsPage() {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={handleOpenTargetModal}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-medium rounded-lg shadow-sm transition-colors border border-slate-300"
+              >
+                <Settings className="w-4 h-4" />
+                目标设置
+              </button>
               <button
                 onClick={handleExport}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-medium rounded-lg shadow-sm transition-colors border border-slate-300"
@@ -635,7 +852,13 @@ export default function EnergyStatisticsPage() {
             trend={calcTrend(currentPeriodData?.electricity, previousPeriodData?.electricity)}
             trendLabel={periodTitle.trend}
             color="blue"
-          />
+          >
+            <TargetProgress
+              current={currentPeriodData?.electricity ?? 0}
+              target={currentTarget.electricity}
+              unit="kWh"
+            />
+          </StatCard>
           <StatCard
             title={`${periodTitle.card}蒸汽耗`}
             value={Number(currentPeriodData?.steam.toFixed(1) ?? 0)}
@@ -644,7 +867,13 @@ export default function EnergyStatisticsPage() {
             trend={calcTrend(currentPeriodData?.steam, previousPeriodData?.steam)}
             trendLabel={periodTitle.trend}
             color="orange"
-          />
+          >
+            <TargetProgress
+              current={currentPeriodData?.steam ?? 0}
+              target={currentTarget.steam}
+              unit="t"
+            />
+          </StatCard>
           <StatCard
             title={`${periodTitle.card}水耗`}
             value={Number(currentPeriodData?.water.toFixed(1) ?? 0)}
@@ -653,7 +882,13 @@ export default function EnergyStatisticsPage() {
             trend={calcTrend(currentPeriodData?.water, previousPeriodData?.water)}
             trendLabel={periodTitle.trend}
             color="green"
-          />
+          >
+            <TargetProgress
+              current={currentPeriodData?.water ?? 0}
+              target={currentTarget.water}
+              unit="t"
+            />
+          </StatCard>
           <StatCard
             title={`${periodTitle.card}总能耗`}
             value={Number(currentPeriodCost.total.toFixed(1) ?? 0)}
@@ -662,7 +897,13 @@ export default function EnergyStatisticsPage() {
             trend={calcTrend(currentPeriodCost.total, previousPeriodCost.total)}
             trendLabel={periodTitle.trend}
             color="purple"
-          />
+          >
+            <TargetProgress
+              current={currentPeriodCost.total}
+              target={currentTarget.totalCost}
+              unit="元"
+            />
+          </StatCard>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -718,7 +959,7 @@ export default function EnergyStatisticsPage() {
                           dataKey="电耗"
                           stroke="#1e3a5f"
                           strokeWidth={2.5}
-                          dot={{ fill: '#1e3a5f', strokeWidth: 2, r: 4 }}
+                          dot={<CustomDot />}
                           activeDot={{ r: 6 }}
                         />
                         <Line
@@ -726,7 +967,7 @@ export default function EnergyStatisticsPage() {
                           dataKey="蒸汽耗"
                           stroke="#e85d26"
                           strokeWidth={2.5}
-                          dot={{ fill: '#e85d26', strokeWidth: 2, r: 4 }}
+                          dot={<CustomDot />}
                           activeDot={{ r: 6 }}
                         />
                         <Line
@@ -734,7 +975,7 @@ export default function EnergyStatisticsPage() {
                           dataKey="水耗"
                           stroke="#2e8b57"
                           strokeWidth={2.5}
-                          dot={{ fill: '#2e8b57', strokeWidth: 2, r: 4 }}
+                          dot={<CustomDot />}
                           activeDot={{ r: 6 }}
                         />
                       </LineChart>
@@ -812,6 +1053,18 @@ export default function EnergyStatisticsPage() {
                         }}
                       />
                       <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      <ReferenceLine
+                        y={currentTarget.totalCost}
+                        stroke="#ef4444"
+                        strokeDasharray="5 5"
+                        strokeWidth={2}
+                        label={{
+                          value: '目标',
+                          position: 'right',
+                          fill: '#ef4444',
+                          fontSize: 12,
+                        }}
+                      />
                       <Bar dataKey="电费" stackId="cost" fill="#1e3a5f" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="蒸汽费" stackId="cost" fill="#e85d26" radius={[0, 0, 0, 0]} />
                       <Bar dataKey="水费" stackId="cost" fill="#2e8b57" radius={[4, 4, 0, 0]} />
@@ -848,12 +1101,24 @@ export default function EnergyStatisticsPage() {
                           fontSize: '12px',
                         }}
                       />
+                      <ReferenceLine
+                        y={currentTarget.electricity}
+                        stroke="#ef4444"
+                        strokeDasharray="3 3"
+                        strokeWidth={1.5}
+                        label={{
+                          value: '目标',
+                          position: 'right',
+                          fill: '#ef4444',
+                          fontSize: 10,
+                        }}
+                      />
                       <Line
                         type="monotone"
                         dataKey="电耗"
                         stroke="#1e3a5f"
                         strokeWidth={2.5}
-                        dot={{ fill: '#1e3a5f', strokeWidth: 2, r: 4 }}
+                        dot={<CustomDot />}
                         activeDot={{ r: 6 }}
                       />
                     </LineChart>
@@ -887,12 +1152,24 @@ export default function EnergyStatisticsPage() {
                           fontSize: '12px',
                         }}
                       />
+                      <ReferenceLine
+                        y={currentTarget.steam}
+                        stroke="#ef4444"
+                        strokeDasharray="3 3"
+                        strokeWidth={1.5}
+                        label={{
+                          value: '目标',
+                          position: 'right',
+                          fill: '#ef4444',
+                          fontSize: 10,
+                        }}
+                      />
                       <Line
                         type="monotone"
                         dataKey="蒸汽耗"
                         stroke="#e85d26"
                         strokeWidth={2.5}
-                        dot={{ fill: '#e85d26', strokeWidth: 2, r: 4 }}
+                        dot={<CustomDot />}
                         activeDot={{ r: 6 }}
                       />
                     </LineChart>
@@ -926,12 +1203,24 @@ export default function EnergyStatisticsPage() {
                           fontSize: '12px',
                         }}
                       />
+                      <ReferenceLine
+                        y={currentTarget.water}
+                        stroke="#ef4444"
+                        strokeDasharray="3 3"
+                        strokeWidth={1.5}
+                        label={{
+                          value: '目标',
+                          position: 'right',
+                          fill: '#ef4444',
+                          fontSize: 10,
+                        }}
+                      />
                       <Line
                         type="monotone"
                         dataKey="水耗"
                         stroke="#2e8b57"
                         strokeWidth={2.5}
-                        dot={{ fill: '#2e8b57', strokeWidth: 2, r: 4 }}
+                        dot={<CustomDot />}
                         activeDot={{ r: 6 }}
                       />
                     </LineChart>
@@ -965,6 +1254,9 @@ export default function EnergyStatisticsPage() {
             columns={columns}
             data={sortedAggregated}
             emptyText="暂无能耗记录"
+            rowClassName={(row) =>
+              (row as { isOverTarget?: boolean }).isOverTarget ? 'bg-red-50/50 hover:bg-red-50' : ''
+            }
           />
         </div>
       </div>
@@ -1084,6 +1376,236 @@ export default function EnergyStatisticsPage() {
               >
                 <Save className="w-4 h-4" />
                 保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isTargetModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-slate-300">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-[#1e3a5f] rounded-t-xl">
+              <h3 className="text-lg font-semibold text-white">目标设置 - {period === 'day' ? '日' : period === 'week' ? '周' : '月'}</h3>
+              <button
+                onClick={() => setIsTargetModalOpen(false)}
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  电耗目标 (kWh)
+                </label>
+                <input
+                  type="number"
+                  value={targetFormState.electricity}
+                  onChange={(e) => handleTargetInputChange('electricity', e.target.value)}
+                  placeholder="请输入电耗目标"
+                  min="0"
+                  step="1"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  蒸汽目标 (t)
+                </label>
+                <input
+                  type="number"
+                  value={targetFormState.steam}
+                  onChange={(e) => handleTargetInputChange('steam', e.target.value)}
+                  placeholder="请输入蒸汽目标"
+                  min="0"
+                  step="0.1"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  水耗目标 (t)
+                </label>
+                <input
+                  type="number"
+                  value={targetFormState.water}
+                  onChange={(e) => handleTargetInputChange('water', e.target.value)}
+                  placeholder="请输入水耗目标"
+                  min="0"
+                  step="0.1"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  总费用目标 (元)
+                </label>
+                <input
+                  type="number"
+                  value={targetFormState.totalCost}
+                  onChange={(e) => handleTargetInputChange('totalCost', e.target.value)}
+                  placeholder="请输入总费用目标"
+                  min="0"
+                  step="1"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+              <button
+                onClick={() => setIsTargetModalOpen(false)}
+                className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveTarget}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] hover:bg-[#2a4f7a] rounded-lg shadow-sm transition-colors border border-[#1e3a5f]"
+              >
+                <Save className="w-4 h-4" />
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDetailModalOpen && selectedRecord && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl border border-slate-300">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-[#1e3a5f] rounded-t-xl">
+              <div>
+                <h3 className="text-lg font-semibold text-white">能耗详情 - {selectedRecord.statDate}</h3>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {selectedRecord.isOverTarget ? '超标记录' : '达标记录'}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsDetailModalOpen(false)}
+                className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                  <div className="text-xs text-slate-500 mb-1">电耗</div>
+                  <div className="text-xl font-bold text-[#1e3a5f]">
+                    {selectedRecord.electricity.toFixed(1)}
+                    <span className="text-sm font-normal text-slate-500 ml-1">kWh</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    目标: {currentTarget.electricity} kWh
+                  </div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                  <div className="text-xs text-slate-500 mb-1">蒸汽耗</div>
+                  <div className="text-xl font-bold text-[#e85d26]">
+                    {selectedRecord.steam.toFixed(1)}
+                    <span className="text-sm font-normal text-slate-500 ml-1">t</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    目标: {currentTarget.steam} t
+                  </div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                  <div className="text-xs text-slate-500 mb-1">水耗</div>
+                  <div className="text-xl font-bold text-[#2e8b57]">
+                    {selectedRecord.water.toFixed(1)}
+                    <span className="text-sm font-normal text-slate-500 ml-1">t</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    目标: {currentTarget.water} t
+                  </div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                  <div className="text-xs text-slate-500 mb-1">总费用</div>
+                  <div className="text-xl font-bold text-amber-600">
+                    ¥{calcCostBreakdown(selectedRecord.electricity, selectedRecord.steam, selectedRecord.water).total.toFixed(1)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    目标: ¥{currentTarget.totalCost}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <BarChart3 className="w-5 h-5 text-[#1e3a5f]" />
+                  <h4 className="text-base font-semibold text-gray-800">实际与目标对比</h4>
+                </div>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={detailChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 12, fill: '#6b7280' }}
+                        stroke="#d1d5db"
+                      />
+                      <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} stroke="#d1d5db" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      <Bar dataKey="实际" fill="#1e3a5f" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="目标" fill="#e5e7eb" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">电耗达标情况</span>
+                  <StatusBadge
+                    status={selectedRecord.electricity > currentTarget.electricity ? 'fail' : 'pass'}
+                    text={selectedRecord.electricity > currentTarget.electricity ? '超标' : '达标'}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">蒸汽耗达标情况</span>
+                  <StatusBadge
+                    status={selectedRecord.steam > currentTarget.steam ? 'fail' : 'pass'}
+                    text={selectedRecord.steam > currentTarget.steam ? '超标' : '达标'}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">水耗达标情况</span>
+                  <StatusBadge
+                    status={selectedRecord.water > currentTarget.water ? 'fail' : 'pass'}
+                    text={selectedRecord.water > currentTarget.water ? '超标' : '达标'}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-200">
+                  <span className="text-slate-700 font-medium">总费用达标情况</span>
+                  <StatusBadge
+                    status={selectedRecord.isOverTarget ? 'fail' : 'pass'}
+                    text={selectedRecord.isOverTarget ? '超标' : '达标'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+              <button
+                onClick={() => setIsDetailModalOpen(false)}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] hover:bg-[#2a4f7a] rounded-lg shadow-sm transition-colors border border-[#1e3a5f]"
+              >
+                关闭
               </button>
             </div>
           </div>

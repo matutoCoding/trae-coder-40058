@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -12,6 +12,11 @@ import {
   Eye,
   Microscope,
   Flag,
+  AlertTriangle,
+  RefreshCw,
+  Save,
+  ThumbsUp,
+  XCircle,
 } from 'lucide-react'
 import {
   LineChart,
@@ -33,6 +38,7 @@ import type {
   AppearanceInspection,
   PhysicalInspection,
   Mold,
+  DefectHandlingRecord,
 } from '@/types'
 
 type TimelineStep =
@@ -60,6 +66,11 @@ export default function BatchDetail() {
   const [searchParams] = useSearchParams()
   const semiFinishedId = searchParams.get('id') || ''
 
+  const [handlingType, setHandlingType] = useState<'rework' | 'scrap' | 'concession'>('rework')
+  const [conclusion, setConclusion] = useState('')
+  const [handler, setHandler] = useState('')
+  const [editingSourceType, setEditingSourceType] = useState<'appearance' | 'physical' | null>(null)
+
   const store = useVulcanizationStore()
 
   const {
@@ -70,6 +81,7 @@ export default function BatchDetail() {
     demolding,
     appearance,
     physical,
+    defectHandlings,
   } = useMemo(() => {
     const sf = store.semiFinished.find((s) => s.id === semiFinishedId) as SemiFinished | undefined
 
@@ -105,6 +117,8 @@ export default function BatchDetail() {
       pi = store.physicalInspection.find((p) => p.appearanceId === ai.id)
     }
 
+    const dh = store.getDefectHandlingByBatchId(semiFinishedId)
+
     return {
       semiFinished: sf,
       vulcanization: vulc,
@@ -113,6 +127,7 @@ export default function BatchDetail() {
       demolding: dm,
       appearance: ai,
       physical: pi,
+      defectHandlings: dh,
     }
   }, [store, semiFinishedId])
 
@@ -201,29 +216,55 @@ export default function BatchDetail() {
       summary: physical ? `硬度 ${physical.hardness}°` : appearance?.result === 'fail' ? '已中止，无需抽检' : undefined,
     })
 
+    const hasDefect = appearance?.result === 'fail' || (physical && (physical.hardnessResult === 'fail'))
+    const appearanceDefectHandled = appearance && appearance.result === 'fail' &&
+      defectHandlings.some(d => d.sourceType === 'appearance' && d.sourceRecordId === appearance.id)
+    const physicalDefectHandled = physical && physical.hardnessResult === 'fail' &&
+      defectHandlings.some(d => d.sourceType === 'physical' && d.sourceRecordId === physical.id)
+    const allDefectsHandled = !hasDefect ||
+      (appearance?.result === 'fail' ? appearanceDefectHandled : true) &&
+      (physical && physical.hardnessResult === 'fail' ? physicalDefectHandled : true)
+
     let finishedStatus: TimelineStatus = 'pending'
-    if (physical) {
+    let finishedTitle = '流程完结'
+    let finishedSummary: string | undefined
+    let finishedTime: string | undefined
+
+    if (!hasDefect && physical) {
       finishedStatus = 'completed'
-    } else if (appearance?.result === 'fail') {
+      finishedTitle = '全部完成'
+      finishedSummary = '全部工序已完成'
+      finishedTime = physical.inspectTime
+    } else if (hasDefect) {
+      if (allDefectsHandled) {
+        finishedStatus = 'completed'
+        finishedTitle = '异常处理已完成'
+        finishedSummary = '不合格项已处理完毕'
+        const latestHandling = defectHandlings
+          .filter(d => d.batchId === semiFinishedId)
+          .sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime())[0]
+        finishedTime = latestHandling?.createTime
+      } else {
+        finishedStatus = 'running'
+        finishedTitle = '待异常处理'
+        finishedSummary = '存在不合格项，需登记处理结论'
+      }
+    } else if (appearance?.result === 'fail' && !physical) {
       finishedStatus = 'skipped'
+      finishedSummary = '已转入不合格品处理'
     }
 
     items.push({
       key: 'finished',
-      title: '流程完结',
+      title: finishedTitle,
       icon: Flag,
       status: finishedStatus,
-      time: physical?.inspectTime,
-      summary:
-        finishedStatus === 'completed'
-          ? '全部工序已完成'
-          : finishedStatus === 'skipped'
-          ? '已转入不合格品处理'
-          : undefined,
+      time: finishedTime,
+      summary: finishedSummary,
     })
 
     return items
-  }, [semiFinished, vulcanization, vulcanizationType, demolding, appearance, physical])
+  }, [semiFinished, vulcanization, vulcanizationType, demolding, appearance, physical, defectHandlings, semiFinishedId])
 
   const nextAction = useMemo(() => {
     if (!semiFinished) return null
@@ -264,14 +305,23 @@ export default function BatchDetail() {
       }
     }
 
+    const hasDefect = appearance?.result === 'fail' || (physical && physical.hardnessResult === 'fail')
+    const appearanceDefectHandled = appearance && appearance.result === 'fail' &&
+      defectHandlings.some(d => d.sourceType === 'appearance' && d.sourceRecordId === appearance.id)
+    const physicalDefectHandled = physical && physical.hardnessResult === 'fail' &&
+      defectHandlings.some(d => d.sourceType === 'physical' && d.sourceRecordId === physical.id)
+    const allDefectsHandled = !hasDefect ||
+      (appearance?.result === 'fail' ? appearanceDefectHandled : true) &&
+      (physical && physical.hardnessResult === 'fail' ? physicalDefectHandled : true)
+
     if (appearance) {
-      if (appearance.result === 'fail') {
+      if (appearance.result === 'fail' && !appearanceDefectHandled) {
         return {
           type: 'warning',
-          text: '提示：外观检验不合格，已转入不合格品处理流程，无需物性抽检',
+          text: '警告：外观检验不合格，请登记异常处理结论',
         }
       }
-      if (!physical) {
+      if (!physical && appearance.result === 'pass') {
         return {
           type: 'action',
           text: '下一步：前往物性抽检',
@@ -282,7 +332,21 @@ export default function BatchDetail() {
       }
     }
 
-    if (physical) {
+    if (physical && physical.hardnessResult === 'fail' && !physicalDefectHandled) {
+      return {
+        type: 'warning',
+        text: '警告：物性抽检不合格，请登记异常处理结论',
+      }
+    }
+
+    if (hasDefect && allDefectsHandled) {
+      return {
+        type: 'success',
+        text: '异常处理已完成，批次已关闭',
+      }
+    }
+
+    if (physical && physical.hardnessResult === 'pass') {
       return {
         type: 'success',
         text: '全部工序已完成！',
@@ -290,9 +354,12 @@ export default function BatchDetail() {
     }
 
     return null
-  }, [semiFinished, vulcanization, demolding, appearance, physical])
+  }, [semiFinished, vulcanization, demolding, appearance, physical, defectHandlings])
 
-  const getTimelineIconStyle = (status: TimelineStatus) => {
+  const getTimelineIconStyle = (status: TimelineStatus, key?: TimelineStep) => {
+    if (key === 'finished' && status === 'running') {
+      return 'bg-[#e85d26] text-white ring-4 ring-[#e85d26]/20'
+    }
     switch (status) {
       case 'completed':
         return 'bg-[#2e8b57] text-white'
@@ -306,8 +373,11 @@ export default function BatchDetail() {
     }
   }
 
-  const getTimelineLineStyle = (status: TimelineStatus, isLast: boolean) => {
+  const getTimelineLineStyle = (status: TimelineStatus, isLast: boolean, key?: TimelineStep) => {
     if (isLast) return ''
+    if (key === 'physical' && status === 'skipped') {
+      return 'bg-[#e85d26]'
+    }
     switch (status) {
       case 'completed':
       case 'running':
@@ -394,12 +464,14 @@ export default function BatchDetail() {
               const Icon = item.icon
               const isLast = idx === timelineItems.length - 1
               const isRunning = item.status === 'running'
+              const isDefectRunning = isRunning && item.key === 'finished'
               return (
                 <div key={item.key} className="flex items-start gap-4 mb-6 last:mb-0">
                   <div className="relative flex flex-col items-center">
                     <div
                       className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${getTimelineIconStyle(
-                        item.status
+                        item.status,
+                        item.key
                       )}`}
                     >
                       {item.status === 'completed' ? (
@@ -410,12 +482,20 @@ export default function BatchDetail() {
                         <Icon className="w-5 h-5" />
                       )}
                       {isRunning && (
-                        <span className="absolute inline-flex h-11 w-11 rounded-full animate-ping bg-[#1e3a5f]/30" />
+                        <span
+                          className={`absolute inline-flex h-11 w-11 rounded-full animate-ping ${
+                            isDefectRunning ? 'bg-[#e85d26]/30' : 'bg-[#1e3a5f]/30'
+                          }`}
+                        />
                       )}
                     </div>
                     {!isLast && (
                       <div
-                        className={`w-0.5 h-14 mt-2 ${getTimelineLineStyle(item.status, isLast)}`}
+                        className={`w-0.5 h-14 mt-2 ${getTimelineLineStyle(
+                          item.status,
+                          isLast,
+                          item.key
+                        )}`}
                       />
                     )}
                   </div>
@@ -754,6 +834,183 @@ export default function BatchDetail() {
               </dl>
             </div>
           )}
+
+          {(() => {
+            const hasDefect = appearance?.result === 'fail' || (physical && physical.hardnessResult === 'fail')
+            const appearanceHandling = appearance && appearance.result === 'fail'
+              ? defectHandlings.find(d => d.sourceType === 'appearance' && d.sourceRecordId === appearance.id)
+              : undefined
+            const physicalHandling = physical && physical.hardnessResult === 'fail'
+              ? defectHandlings.find(d => d.sourceType === 'physical' && d.sourceRecordId === physical.id)
+              : undefined
+
+            if (!hasDefect) {
+              return (
+                <div className="md:col-span-2 bg-emerald-50 rounded-xl border border-emerald-200 p-5 flex flex-col items-center justify-center">
+                  <ThumbsUp className="w-10 h-10 text-[#2e8b57] mb-2" />
+                  <p className="text-sm text-[#2e8b57] font-medium">本批次无不合格项，流程正常</p>
+                </div>
+              )
+            }
+
+            const handleSubmit = (sourceType: 'appearance' | 'physical', sourceRecordId: string) => {
+              if (!conclusion.trim() || !handler.trim()) return
+              store.addDefectHandling({
+                id: '',
+                batchId: semiFinishedId,
+                sourceType,
+                sourceRecordId,
+                handlingType,
+                conclusion,
+                handler,
+                createTime: new Date().toLocaleString('zh-CN'),
+              })
+              setConclusion('')
+              setHandler('')
+              setEditingSourceType(null)
+            }
+
+            const handleReEdit = (sourceType: 'appearance' | 'physical', record: DefectHandlingRecord) => {
+              setHandlingType(record.handlingType)
+              setConclusion(record.conclusion)
+              setHandler(record.handler)
+              setEditingSourceType(sourceType)
+            }
+
+            const getHandlingTypeLabel = (type: 'rework' | 'scrap' | 'concession') => {
+              switch (type) {
+                case 'rework': return '返工'
+                case 'scrap': return '报废'
+                case 'concession': return '让步接收'
+              }
+            }
+
+            const getHandlingTypeColor = (type: 'rework' | 'scrap' | 'concession') => {
+              switch (type) {
+                case 'rework': return 'bg-blue-100 text-blue-700 border-blue-200'
+                case 'scrap': return 'bg-red-100 text-red-700 border-red-200'
+                case 'concession': return 'bg-amber-100 text-amber-700 border-amber-200'
+              }
+            }
+
+            const renderDefectItem = (
+              sourceType: 'appearance' | 'physical',
+              sourceRecordId: string,
+              sourceName: string,
+              handling: DefectHandlingRecord | undefined
+            ) => {
+              const isEditing = editingSourceType === sourceType
+
+              if (handling && !isEditing) {
+                return (
+                  <div key={sourceType} className="bg-white rounded-lg border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-5 h-5 text-[#e85d26]" />
+                        <span className="font-medium text-gray-800">{sourceName}</span>
+                      </div>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getHandlingTypeColor(handling.handlingType)}`}>
+                        {getHandlingTypeLabel(handling.handlingType)}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div>
+                        <span className="text-gray-500">处理结论：</span>
+                        <span className="text-gray-800">{handling.conclusion}</span>
+                      </div>
+                      <div className="flex gap-4">
+                        <div>
+                          <span className="text-gray-500">处理人：</span>
+                          <span className="text-gray-800">{handling.handler}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">处理时间：</span>
+                          <span className="text-gray-800">{handling.createTime}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleReEdit(sourceType, handling)}
+                      className="mt-3 inline-flex items-center gap-1 text-xs text-[#1e3a5f] hover:text-[#16304f] font-medium transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      重新登记
+                    </button>
+                  </div>
+                )
+              }
+
+              return (
+                <div key={sourceType} className="bg-orange-50 rounded-lg border border-orange-200 p-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <AlertTriangle className="w-5 h-5 text-[#e85d26]" />
+                    <span className="font-medium text-[#e85d26]">{sourceName} - 异常处理登记</span>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">不合格来源</label>
+                      <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-600">
+                        {sourceName}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">处理方式</label>
+                      <select
+                        value={isEditing ? handlingType : 'rework'}
+                        onChange={(e) => setHandlingType(e.target.value as 'rework' | 'scrap' | 'concession')}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#e85d26]/30 focus:border-[#e85d26]"
+                      >
+                        <option value="rework">返工</option>
+                        <option value="scrap">报废</option>
+                        <option value="concession">让步接收</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">处理结论</label>
+                      <textarea
+                        value={isEditing ? conclusion : ''}
+                        onChange={(e) => setConclusion(e.target.value)}
+                        rows={3}
+                        placeholder="请输入处理结论说明"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#e85d26]/30 focus:border-[#e85d26] resize-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">处理人</label>
+                      <input
+                        type="text"
+                        value={isEditing ? handler : ''}
+                        onChange={(e) => setHandler(e.target.value)}
+                        placeholder="请输入处理人姓名"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#e85d26]/30 focus:border-[#e85d26]"
+                      />
+                    </div>
+                    <button
+                      onClick={() => handleSubmit(sourceType, sourceRecordId)}
+                      disabled={!conclusion.trim() || !handler.trim()}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#e85d26] hover:bg-[#d14a1a] disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors text-sm"
+                    >
+                      <Save className="w-4 h-4" />
+                      提交处理
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+
+            return (
+              <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h4 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-[#e85d26]" />
+                  不合格处理
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {appearance?.result === 'fail' && appearance.id && renderDefectItem('appearance', appearance.id, '外观检验', appearanceHandling)}
+                  {physical && physical.hardnessResult === 'fail' && physical.id && renderDefectItem('physical', physical.id, '物性抽检', physicalHandling)}
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {nextAction && (

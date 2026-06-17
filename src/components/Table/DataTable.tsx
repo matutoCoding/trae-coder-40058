@@ -12,12 +12,14 @@ interface DataTableProps<T> {
   columns: Column<T>[]
   data: T[]
   emptyText?: string
+  rowClassName?: (row: T) => string
 }
 
 export default function DataTable<T extends { id?: string }>({
   columns,
   data,
   emptyText = '暂无数据',
+  rowClassName,
 }: DataTableProps<T>) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
@@ -53,7 +55,7 @@ export default function DataTable<T extends { id?: string }>({
               data.map((row, idx) => (
                 <tr
                   key={(row as { id?: string }).id || idx}
-                  className="hover:bg-gray-50/80 transition-colors"
+                  className={`hover:bg-gray-50/80 transition-colors ${rowClassName ? rowClassName(row) : ''}`}
                 >
                   {columns.map((col) => (
                     <td

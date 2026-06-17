@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Package,
@@ -16,6 +17,8 @@ import {
   Factory,
   Check,
   ExternalLink,
+  Filter,
+  Inbox,
 } from 'lucide-react'
 import {
   LineChart,
@@ -72,8 +75,11 @@ export default function Dashboard() {
   const todayTotal = todayQualifiedTotal + todayDefectiveTotal
   const passRate = todayTotal > 0 ? ((todayQualifiedTotal / todayTotal) * 100).toFixed(1) : '0.0'
 
-  const todayEnergy = store.energyStatistics.find((e) => isToday(e.statDate))
-  const todayEnergyCost = todayEnergy ? todayEnergy.totalCost : 0
+  const todayEnergyList = store.energyStatistics.filter((e) => isToday(e.statDate))
+  const todayElectricity = todayEnergyList.reduce((sum, e) => sum + e.electricity, 0)
+  const todaySteam = todayEnergyList.reduce((sum, e) => sum + e.steam, 0)
+  const todayWater = todayEnergyList.reduce((sum, e) => sum + e.water, 0)
+  const todayEnergyCost = todayElectricity * 0.8 + todaySteam * 200 + todayWater * 5
 
   const activeBatches =
     store.plateVulcanization.filter((p) => p.status === 'running').length +
@@ -116,8 +122,11 @@ export default function Dashboard() {
   const passRateTrend =
     yesterdayTotal > 0 ? todayPassRateNum - yesterdayPassRate : undefined
 
-  const yesterdayEnergy = store.energyStatistics.find((e) => isYesterday(e.statDate))
-  const yesterdayEnergyCost = yesterdayEnergy ? yesterdayEnergy.totalCost : 0
+  const yesterdayEnergyList = store.energyStatistics.filter((e) => isYesterday(e.statDate))
+  const yesterdayElectricity = yesterdayEnergyList.reduce((sum, e) => sum + e.electricity, 0)
+  const yesterdaySteam = yesterdayEnergyList.reduce((sum, e) => sum + e.steam, 0)
+  const yesterdayWater = yesterdayEnergyList.reduce((sum, e) => sum + e.water, 0)
+  const yesterdayEnergyCost = yesterdayElectricity * 0.8 + yesterdaySteam * 200 + yesterdayWater * 5
   const energyTrend =
     yesterdayEnergyCost > 0 ? ((todayEnergyCost - yesterdayEnergyCost) / yesterdayEnergyCost) * 100 : undefined
 
@@ -148,9 +157,60 @@ export default function Dashboard() {
     { name: '物性抽检', count: store.getAppearanceForPhysical().length, total: Math.max(store.physicalInspection.length, 30), color: 'bg-[#f59e0b]' },
   ]
 
+  const [batchFilter, setBatchFilter] = useState<'all' | 'demolding' | 'appearance' | 'physical' | 'abnormal'>('all')
+
   const batchFlowList = store.getBatchFlowStatus()
-  const displayBatchList = batchFlowList.slice(0, 8)
   const flowSteps = ['半成品接收', '硫化工序', '脱模修边', '外观检验', '物性抽检', '全部完成']
+
+  const demoldingCount =
+    store.getCompletedVulcanizationForDemolding('plate').length +
+    store.getCompletedVulcanizationForDemolding('tank').length
+  const appearanceCount = store.getDemoldingForAppearance().length
+  const physicalCount = store.getAppearanceForPhysical().length
+  const failedAppearanceCount = store.getFailedAppearanceForReference().length
+  const failedPhysicalCount = store.physicalInspection.filter(
+    (p) => p.hardnessResult === 'fail'
+  ).length
+  const abnormalCount = failedAppearanceCount + failedPhysicalCount
+
+  const filterTabs = [
+    { key: 'all' as const, label: '全部', count: batchFlowList.length },
+    { key: 'demolding' as const, label: '待脱模', count: demoldingCount },
+    { key: 'appearance' as const, label: '待外观', count: appearanceCount },
+    { key: 'physical' as const, label: '待物性', count: physicalCount },
+    { key: 'abnormal' as const, label: '异常批次', count: abnormalCount },
+  ]
+
+  const getFilteredBatchList = () => {
+    if (batchFilter === 'all') {
+      return batchFlowList
+    }
+    return batchFlowList.filter((batch) => {
+      const { stepIndex, details } = batch
+      const vulc = details.vulcanization as { status?: string } | undefined
+      const appearance = details.appearance as { result?: string } | undefined
+      const physical = details.physical as { hardnessResult?: string } | undefined
+
+      switch (batchFilter) {
+        case 'demolding':
+          return stepIndex === 1 && vulc?.status === 'completed'
+        case 'appearance':
+          return stepIndex === 2
+        case 'physical':
+          return stepIndex === 3 && appearance?.result === 'pass'
+        case 'abnormal':
+          return (
+            (stepIndex === 3 && appearance?.result === 'fail') ||
+            (physical && physical.hardnessResult === 'fail')
+          )
+        default:
+          return true
+      }
+    })
+  }
+
+  const filteredBatchList = getFilteredBatchList()
+  const displayBatchList = filteredBatchList.slice(0, 8)
 
   const getBadgeCounts = () => ({
     '/semi-finished': store.semiFinished.length,
@@ -356,14 +416,59 @@ export default function Dashboard() {
                 <h3 className="text-lg font-semibold text-gray-800">批次流转追踪</h3>
                 <span className="text-xs text-gray-500">实时追踪各批次当前工序进度</span>
               </div>
-              {batchFlowList.length > 8 && (
+              {filteredBatchList.length > 8 && (
                 <NavLink to="/dashboard" className="text-xs text-[#1e3a5f] hover:underline">
-                  查看全部 {batchFlowList.length} 个批次
+                  查看全部 {filteredBatchList.length} 个批次
                 </NavLink>
               )}
             </div>
+
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              {filterTabs.map((tab) => {
+                const isActive = batchFilter === tab.key
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setBatchFilter(tab.key)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      isActive
+                        ? 'bg-[#1e3a5f] text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-md text-xs font-bold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-white text-gray-500'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
             {displayBatchList.length === 0 ? (
-              <div className="text-center py-10 text-gray-400 text-sm">暂无批次流转数据</div>
+              <div className="text-center py-12 flex flex-col items-center gap-3">
+                {batchFilter === 'abnormal' ? (
+                  <>
+                    <CheckCircle2 className="w-12 h-12 text-emerald-400" />
+                    <div className="text-gray-400 text-sm">暂无异常批次 🎉</div>
+                  </>
+                ) : (
+                  <>
+                    <Inbox className="w-12 h-12 text-gray-300" />
+                    <div className="text-gray-400 text-sm">
+                      {batchFilter === 'demolding' && '暂无待脱模批次'}
+                      {batchFilter === 'appearance' && '暂无待外观检验批次'}
+                      {batchFilter === 'physical' && '暂无待物性抽检批次'}
+                      {batchFilter === 'all' && '暂无批次流转数据'}
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {displayBatchList.map((batch) => {
