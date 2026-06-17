@@ -9,6 +9,7 @@ import Demolding from "@/pages/Demolding";
 import AppearanceInspection from "@/pages/AppearanceInspection";
 import PhysicalInspection from "@/pages/PhysicalInspection";
 import EnergyStatistics from "@/pages/EnergyStatistics";
+import BatchDetail from "@/pages/BatchDetail";
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/appearance-inspection" element={<AppearanceInspection />} />
           <Route path="/physical-inspection" element={<PhysicalInspection />} />
           <Route path="/energy-statistics" element={<EnergyStatistics />} />
+          <Route path="/batch-detail" element={<BatchDetail />} />
         </Route>
       </Routes>
     </Router>

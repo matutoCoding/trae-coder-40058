@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Package,
   Wrench,
@@ -14,8 +14,8 @@ import {
   Activity,
   TrendingUp,
   Factory,
-  LayoutDashboard,
   Check,
+  ExternalLink,
 } from 'lucide-react'
 import {
   LineChart,
@@ -31,8 +31,17 @@ import StatCard from '@/components/Card/StatCard'
 import PageHeader from '@/components/Form/PageHeader'
 import { useVulcanizationStore } from '@/store'
 
+const todayStr = new Date().toLocaleDateString('zh-CN')
+
+const isToday = (dateStr: string) => {
+  try {
+    return new Date(dateStr).toLocaleDateString('zh-CN') === todayStr
+  } catch {
+    return false
+  }
+}
+
 const quickLinks = [
-  { path: '/dashboard', label: '工作台', icon: LayoutDashboard, color: 'from-[#1e3a5f] to-[#2a4f7a]' },
   { path: '/semi-finished', label: '半成品接收', icon: Package, color: 'from-[#2563eb] to-[#3b82f6]' },
   { path: '/mold-prep', label: '模具准备', icon: Wrench, color: 'from-[#7c3aed] to-[#8b5cf6]' },
   { path: '/plate-vulcanization', label: '平板硫化', icon: Flame, color: 'from-[#e85d26] to-[#f97316]' },
@@ -41,16 +50,6 @@ const quickLinks = [
   { path: '/appearance-inspection', label: '外观检验', icon: Eye, color: 'from-[#059669] to-[#10b981]' },
   { path: '/physical-inspection', label: '物性抽检', icon: Microscope, color: 'from-[#d97706] to-[#f59e0b]' },
   { path: '/energy-statistics', label: '能耗统计', icon: Zap, color: 'from-[#2e8b57] to-[#34d399]' },
-]
-
-const processStatus = [
-  { name: '半成品接收', count: 12, total: 30, color: 'bg-[#3b82f6]' },
-  { name: '模具准备', count: 8, total: 30, color: 'bg-[#8b5cf6]' },
-  { name: '平板硫化', count: 15, total: 30, color: 'bg-[#e85d26]' },
-  { name: '罐式硫化', count: 6, total: 30, color: 'bg-[#06b6d4]' },
-  { name: '脱模修边', count: 10, total: 30, color: 'bg-[#ec4899]' },
-  { name: '外观检验', count: 5, total: 30, color: 'bg-[#10b981]' },
-  { name: '物性抽检', count: 3, total: 30, color: 'bg-[#f59e0b]' },
 ]
 
 const recentActivities = [
@@ -63,36 +62,74 @@ const recentActivities = [
 ]
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const store = useVulcanizationStore()
 
-  const todayProduction =
-    store.demolding.reduce((sum, d) => sum + d.qualifiedQty + d.defectiveQty, 0) * 10
+  const todayDemoldingList = store.demolding.filter((d) => isToday(d.createTime))
+  const todayProduction = todayDemoldingList.reduce((sum, d) => sum + d.qualifiedQty, 0)
+  const todayQualifiedTotal = todayDemoldingList.reduce((sum, d) => sum + d.qualifiedQty, 0)
+  const todayDefectiveTotal = todayDemoldingList.reduce((sum, d) => sum + d.defectiveQty, 0)
+  const todayTotal = todayQualifiedTotal + todayDefectiveTotal
+  const passRate = todayTotal > 0 ? ((todayQualifiedTotal / todayTotal) * 100).toFixed(1) : '0.0'
 
-  const totalDemolded = store.demolding.reduce(
-    (sum, d) => sum + d.qualifiedQty + d.defectiveQty,
-    0
-  )
-  const qualifiedDemolded = store.demolding.reduce((sum, d) => sum + d.qualifiedQty, 0)
-  const passRate = totalDemolded > 0 ? ((qualifiedDemolded / totalDemolded) * 100).toFixed(1) : '0.0'
-
-  const todayEnergyCost =
-    store.energyStatistics.length > 0
-      ? store.energyStatistics[store.energyStatistics.length - 1].totalCost
-      : 0
+  const todayEnergy = store.energyStatistics.find((e) => isToday(e.statDate))
+  const todayEnergyCost = todayEnergy ? todayEnergy.totalCost : 0
 
   const activeBatches =
     store.plateVulcanization.filter((p) => p.status === 'running').length +
     store.tankVulcanization.filter((t) => t.status === 'running').length
 
   const pendingTasks =
-    store.molds.filter((m) => m.status === 'available').length +
-    store.plateVulcanization.filter((p) => p.status === 'pending').length +
-    store.tankVulcanization.filter((t) => t.status === 'pending').length
+    store.getAvailableSemiFinishedForVulcanization().length +
+    store.getCompletedVulcanizationForDemolding('plate').length +
+    store.getCompletedVulcanizationForDemolding('tank').length +
+    store.getDemoldingForAppearance().length +
+    store.getAppearanceForPhysical().length
 
-  const completedToday =
-    store.plateVulcanization.filter((p) => p.status === 'completed').length +
-    store.tankVulcanization.filter((t) => t.status === 'completed').length +
-    store.demolding.length
+  const todayCompletedPlate = store.plateVulcanization.filter(
+    (p) => p.status === 'completed' && p.endTime && isToday(p.endTime)
+  ).length
+  const todayCompletedTank = store.tankVulcanization.filter(
+    (t) => t.status === 'completed' && t.endTime && isToday(t.endTime)
+  ).length
+  const completedToday = todayCompletedPlate + todayCompletedTank
+
+  const yesterdayStr = new Date(Date.now() - 86400000).toLocaleDateString('zh-CN')
+  const isYesterday = (dateStr: string) => {
+    try {
+      return new Date(dateStr).toLocaleDateString('zh-CN') === yesterdayStr
+    } catch {
+      return false
+    }
+  }
+
+  const yesterdayDemoldingList = store.demolding.filter((d) => isYesterday(d.createTime))
+  const yesterdayProduction = yesterdayDemoldingList.reduce((sum, d) => sum + d.qualifiedQty, 0)
+  const productionTrend =
+    yesterdayProduction > 0 ? ((todayProduction - yesterdayProduction) / yesterdayProduction) * 100 : undefined
+
+  const yesterdayQualified = yesterdayDemoldingList.reduce((sum, d) => sum + d.qualifiedQty, 0)
+  const yesterdayDefective = yesterdayDemoldingList.reduce((sum, d) => sum + d.defectiveQty, 0)
+  const yesterdayTotal = yesterdayQualified + yesterdayDefective
+  const yesterdayPassRate = yesterdayTotal > 0 ? (yesterdayQualified / yesterdayTotal) * 100 : 0
+  const todayPassRateNum = todayTotal > 0 ? (todayQualifiedTotal / todayTotal) * 100 : 0
+  const passRateTrend =
+    yesterdayTotal > 0 ? todayPassRateNum - yesterdayPassRate : undefined
+
+  const yesterdayEnergy = store.energyStatistics.find((e) => isYesterday(e.statDate))
+  const yesterdayEnergyCost = yesterdayEnergy ? yesterdayEnergy.totalCost : 0
+  const energyTrend =
+    yesterdayEnergyCost > 0 ? ((todayEnergyCost - yesterdayEnergyCost) / yesterdayEnergyCost) * 100 : undefined
+
+  const yesterdayCompletedPlate = store.plateVulcanization.filter(
+    (p) => p.status === 'completed' && p.endTime && isYesterday(p.endTime)
+  ).length
+  const yesterdayCompletedTank = store.tankVulcanization.filter(
+    (t) => t.status === 'completed' && t.endTime && isYesterday(t.endTime)
+  ).length
+  const yesterdayCompleted = yesterdayCompletedPlate + yesterdayCompletedTank
+  const completedTrend =
+    yesterdayCompleted > 0 ? ((completedToday - yesterdayCompleted) / yesterdayCompleted) * 100 : undefined
 
   const energyData = store.energyStatistics.slice(-7).map((e) => ({
     date: e.statDate.slice(5),
@@ -101,9 +138,98 @@ export default function Dashboard() {
     水费: e.water * 50,
   }))
 
+  const processStatus = [
+    { name: '半成品接收', count: store.semiFinished.length, total: Math.max(store.semiFinished.length, 30), color: 'bg-[#3b82f6]' },
+    { name: '模具准备', count: store.molds.filter((m) => m.status === 'available').length, total: Math.max(store.molds.length, 30), color: 'bg-[#8b5cf6]' },
+    { name: '平板硫化', count: store.plateVulcanization.filter((p) => p.status === 'running').length, total: Math.max(store.plateVulcanization.length, 30), color: 'bg-[#e85d26]' },
+    { name: '罐式硫化', count: store.tankVulcanization.filter((t) => t.status === 'running').length, total: Math.max(store.tankVulcanization.length, 30), color: 'bg-[#06b6d4]' },
+    { name: '脱模修边', count: store.getCompletedVulcanizationForDemolding('plate').length + store.getCompletedVulcanizationForDemolding('tank').length, total: Math.max(store.demolding.length, 30), color: 'bg-[#ec4899]' },
+    { name: '外观检验', count: store.getDemoldingForAppearance().length, total: Math.max(store.appearanceInspection.length, 30), color: 'bg-[#10b981]' },
+    { name: '物性抽检', count: store.getAppearanceForPhysical().length, total: Math.max(store.physicalInspection.length, 30), color: 'bg-[#f59e0b]' },
+  ]
+
   const batchFlowList = store.getBatchFlowStatus()
   const displayBatchList = batchFlowList.slice(0, 8)
   const flowSteps = ['半成品接收', '硫化工序', '脱模修边', '外观检验', '物性抽检', '全部完成']
+
+  const getBadgeCounts = () => ({
+    '/semi-finished': store.semiFinished.length,
+    '/mold-prep': store.molds.filter((m) => m.status === 'available').length,
+    '/plate-vulcanization': store.getAvailableSemiFinishedForVulcanization().length,
+    '/tank-vulcanization': store.getAvailableSemiFinishedForVulcanization().length,
+    '/demolding':
+      store.getCompletedVulcanizationForDemolding('plate').length +
+      store.getCompletedVulcanizationForDemolding('tank').length,
+    '/appearance-inspection': store.getDemoldingForAppearance().length,
+    '/physical-inspection': store.getAppearanceForPhysical().length,
+    '/energy-statistics': store.energyStatistics.length,
+  })
+
+  const badgeCounts = getBadgeCounts()
+
+  const getBatchStatusInfo = (batch: typeof batchFlowList[0]) => {
+    const { stepIndex, details } = batch
+    const vulc = details.vulcanization as { status?: string } | undefined
+    const appearance = details.appearance as { result?: string } | undefined
+
+    if (stepIndex === 0) {
+      return { title: '待安排硫化', color: 'amber', label: '待办' }
+    }
+    if (stepIndex === 1) {
+      if (vulc?.status === 'running') {
+        return { title: '正在硫化中', color: 'blue', label: '进行' }
+      }
+      return { title: '待脱模', color: 'amber', label: '待办' }
+    }
+    if (stepIndex === 2) {
+      return { title: '待外观检验', color: 'amber', label: '待办' }
+    }
+    if (stepIndex === 3) {
+      if (appearance?.result === 'fail') {
+        return { title: '外观不合格', color: 'red', label: '异常' }
+      }
+      return { title: '待物性抽检', color: 'amber', label: '待办' }
+    }
+    if (stepIndex === 5) {
+      return { title: '全部完成', color: 'green', label: '完成' }
+    }
+    return { title: batch.currentStep, color: 'blue' as const, label: '进行' }
+  }
+
+  const getStatusStyles = (color: string) => {
+    switch (color) {
+      case 'amber':
+        return {
+          badgeBg: 'bg-amber-100 text-amber-700',
+          dotBg: 'bg-amber-500',
+          titleColor: 'text-amber-700',
+        }
+      case 'blue':
+        return {
+          badgeBg: 'bg-blue-100 text-blue-700',
+          dotBg: 'bg-blue-500',
+          titleColor: 'text-blue-700',
+        }
+      case 'green':
+        return {
+          badgeBg: 'bg-emerald-100 text-emerald-700',
+          dotBg: 'bg-emerald-500',
+          titleColor: 'text-emerald-700',
+        }
+      case 'red':
+        return {
+          badgeBg: 'bg-red-100 text-red-700',
+          dotBg: 'bg-red-500',
+          titleColor: 'text-red-700',
+        }
+      default:
+        return {
+          badgeBg: 'bg-gray-100 text-gray-700',
+          dotBg: 'bg-gray-500',
+          titleColor: 'text-gray-700',
+        }
+    }
+  }
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -150,7 +276,7 @@ export default function Dashboard() {
           value={todayProduction}
           unit="件"
           icon={Factory}
-          trend={5.2}
+          trend={productionTrend}
           trendLabel="较昨日"
           color="blue"
         />
@@ -159,7 +285,7 @@ export default function Dashboard() {
           value={passRate}
           unit="%"
           icon={CheckCircle2}
-          trend={1.8}
+          trend={passRateTrend}
           trendLabel="较昨日"
           color="green"
         />
@@ -168,7 +294,7 @@ export default function Dashboard() {
           value={todayEnergyCost}
           unit="元"
           icon={Zap}
-          trend={-3.1}
+          trend={energyTrend}
           trendLabel="较昨日"
           color="orange"
         />
@@ -189,9 +315,9 @@ export default function Dashboard() {
         <StatCard
           title="今日完成"
           value={completedToday}
-          unit="单"
+          unit="批"
           icon={TrendingUp}
-          trend={8.5}
+          trend={completedTrend}
           trendLabel="较昨日"
           color="green"
         />
@@ -216,7 +342,7 @@ export default function Dashboard() {
                   <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${item.color} rounded-full transition-all duration-500`}
-                      style={{ width: `${(item.count / item.total) * 100}%` }}
+                      style={{ width: `${item.total > 0 ? (item.count / item.total) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
@@ -240,73 +366,112 @@ export default function Dashboard() {
               <div className="text-center py-10 text-gray-400 text-sm">暂无批次流转数据</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {displayBatchList.map((batch) => (
-                  <div
-                    key={batch.semiFinishedId}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-[#1e3a5f]/30 hover:shadow-sm transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="font-semibold text-gray-800 text-sm">{batch.batchNo}</span>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                          batch.stepIndex === 5
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-blue-100 text-blue-700'
-                        }`}
-                      >
-                        {batch.currentStep}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 mb-3">更新于 {batch.timestamp}</div>
-                    <div className="relative">
-                      {flowSteps.map((step, idx) => {
-                        const isCompleted = idx <= batch.stepIndex
-                        const isCurrent = idx === batch.stepIndex + 1 && batch.stepIndex !== 5
-                        return (
-                          <div key={step} className="flex items-start gap-3 mb-2 last:mb-0">
-                            <div className="relative flex flex-col items-center">
-                              <div
-                                className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                                  isCompleted
-                                    ? 'bg-emerald-500 text-white'
-                                    : isCurrent
-                                    ? 'bg-blue-500 ring-4 ring-blue-100'
-                                    : 'bg-gray-300'
-                                }`}
-                              >
-                                {isCompleted && <Check className="w-3 h-3" />}
-                                {isCurrent && (
-                                  <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                                  </span>
+                {displayBatchList.map((batch) => {
+                  const statusInfo = getBatchStatusInfo(batch)
+                  const statusStyles = getStatusStyles(statusInfo.color)
+                  const isRunning = statusInfo.color === 'blue'
+                  const isFail = statusInfo.color === 'red'
+                  return (
+                    <div
+                      key={batch.semiFinishedId}
+                      onClick={() => navigate(`/batch-detail?id=${batch.semiFinishedId}`)}
+                      className="border border-gray-200 rounded-lg p-4 hover:border-[#1e3a5f]/30 hover:shadow-sm hover:bg-gray-50 transition-all cursor-pointer relative group"
+                    >
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ExternalLink className="w-4 h-4 text-gray-400" />
+                      </div>
+                      <div className="flex items-center justify-between mb-3 pr-6">
+                        <span className="font-semibold text-gray-800 text-sm">{batch.batchNo}</span>
+                        <div className="flex items-center gap-2">
+                          {isFail && <AlertTriangle className="w-3.5 h-3.5 text-red-500" />}
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusStyles.badgeBg}`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${statusStyles.dotBg} ${isRunning ? 'animate-pulse' : ''}`}
+                            />
+                            {statusInfo.label}
+                          </span>
+                        </div>
+                      </div>
+                      <div className={`text-sm font-medium mb-2 ${statusStyles.titleColor}`}>
+                        {statusInfo.title}
+                      </div>
+                      <div className="text-xs text-gray-500 mb-3">更新于 {batch.timestamp}</div>
+                      <div className="relative">
+                        {flowSteps.map((step, idx) => {
+                          const isCompleted = idx <= batch.stepIndex
+                          const isCurrent = idx === batch.stepIndex + 1 && batch.stepIndex !== 5
+                          const useCustomColor = idx === batch.stepIndex && statusInfo.color !== 'blue'
+                          const dotColor = useCustomColor
+                            ? statusInfo.color === 'amber'
+                              ? 'bg-amber-500'
+                              : statusInfo.color === 'red'
+                              ? 'bg-red-500'
+                              : statusInfo.color === 'green'
+                              ? 'bg-emerald-500'
+                              : 'bg-emerald-500'
+                            : isCompleted
+                            ? 'bg-emerald-500'
+                            : isCurrent
+                            ? 'bg-blue-500'
+                            : 'bg-gray-300'
+                          const ringColor = useCustomColor
+                            ? statusInfo.color === 'amber'
+                              ? 'ring-amber-100'
+                              : statusInfo.color === 'red'
+                              ? 'ring-red-100'
+                              : statusInfo.color === 'green'
+                              ? 'ring-emerald-100'
+                              : 'ring-blue-100'
+                            : 'ring-blue-100'
+                          const textColor = useCustomColor
+                            ? statusInfo.color === 'amber'
+                              ? 'text-amber-700'
+                              : statusInfo.color === 'red'
+                              ? 'text-red-700'
+                              : statusInfo.color === 'green'
+                              ? 'text-emerald-700'
+                              : 'text-emerald-700'
+                            : isCompleted
+                            ? 'text-emerald-700'
+                            : isCurrent
+                            ? 'text-blue-700'
+                            : 'text-gray-400'
+                          const lineColor =
+                            idx < batch.stepIndex
+                              ? useCustomColor && statusInfo.color !== 'green'
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500'
+                              : 'bg-gray-200'
+                          return (
+                            <div key={step} className="flex items-start gap-3 mb-2 last:mb-0">
+                              <div className="relative flex flex-col items-center">
+                                <div
+                                  className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${dotColor} ${isCurrent && !useCustomColor ? `ring-4 ${ringColor}` : ''}`}
+                                >
+                                  {isCompleted && !isCurrent && <Check className="w-3 h-3 text-white" />}
+                                  {isCurrent && !useCustomColor && (
+                                    <span className="relative flex h-2 w-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                                    </span>
+                                  )}
+                                </div>
+                                {idx < flowSteps.length - 1 && (
+                                  <div className={`w-0.5 h-4 mt-0.5 ${lineColor}`} />
                                 )}
                               </div>
-                              {idx < flowSteps.length - 1 && (
-                                <div
-                                  className={`w-0.5 h-4 mt-0.5 ${
-                                    idx < batch.stepIndex ? 'bg-emerald-500' : 'bg-gray-200'
-                                  }`}
-                                />
-                              )}
+                              <span className={`text-xs leading-5 font-medium ${textColor}`}>
+                                {step}
+                              </span>
                             </div>
-                            <span
-                              className={`text-xs leading-5 ${
-                                isCompleted
-                                  ? 'text-emerald-700 font-medium'
-                                  : isCurrent
-                                  ? 'text-blue-700 font-medium'
-                                  : 'text-gray-400'
-                              }`}
-                            >
-                              {step}
-                            </span>
-                          </div>
-                        )
-                      })}
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -395,19 +560,28 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-800">快速入口</h3>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             {quickLinks.map((link) => {
               const Icon = link.icon
+              const count = badgeCounts[link.path as keyof typeof badgeCounts] || 0
+              const showBadge = count > 0
               return (
                 <NavLink
                   key={link.path}
                   to={link.path}
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all duration-200 group"
+                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all duration-200 group relative"
                 >
-                  <div
-                    className={`w-10 h-10 rounded-lg bg-gradient-to-br ${link.color} flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-200`}
-                  >
-                    <Icon className="w-5 h-5" />
+                  <div className="relative">
+                    <div
+                      className={`w-10 h-10 rounded-lg bg-gradient-to-br ${link.color} flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-200`}
+                    >
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    {showBadge && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm">
+                        {count > 99 ? '99+' : count}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-gray-600 font-medium text-center leading-tight">
                     {link.label}

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Scissors, Plus, CheckCircle2, XCircle, Percent, Save, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Scissors, Plus, CheckCircle2, XCircle, Percent, Save, X, Flame } from 'lucide-react'
 import PageHeader from '@/components/Form/PageHeader'
 import DataTable, { type Column } from '@/components/Table/DataTable'
 import StatCard from '@/components/Card/StatCard'
@@ -32,6 +33,7 @@ const initialFormState: FormState = {
 }
 
 export default function DemoldingPage() {
+  const navigate = useNavigate()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formState, setFormState] = useState<FormState>(initialFormState)
   const demolding = useVulcanizationStore((state) => state.demolding)
@@ -39,6 +41,9 @@ export default function DemoldingPage() {
   const addDemolding = useVulcanizationStore((state) => state.addDemolding)
   const getCompletedVulcanizationForDemolding = useVulcanizationStore(
     (state) => state.getCompletedVulcanizationForDemolding
+  )
+  const getRunningVulcanizationBatches = useVulcanizationStore(
+    (state) => state.getRunningVulcanizationBatches
   )
 
   const today = new Date().toLocaleDateString('zh-CN')
@@ -61,6 +66,10 @@ export default function DemoldingPage() {
     return getCompletedVulcanizationForDemolding(formState.vulcanizationType)
   }, [formState.vulcanizationType, getCompletedVulcanizationForDemolding])
 
+  const runningBatches = useMemo(() => {
+    return getRunningVulcanizationBatches()
+  }, [getRunningVulcanizationBatches])
+
   const getBatchNoById = (id: string) => {
     const sf = semiFinished.find((s) => s.id === id)
     return sf ? sf.batchNo : '-'
@@ -69,7 +78,8 @@ export default function DemoldingPage() {
   const getVulcanizationLabel = (record: PlateVulcanization | TankVulcanization) => {
     const batchNo = getBatchNoById(record.semiFinishedId)
     const typeLabel = formState.vulcanizationType === 'plate' ? '平板' : '罐式'
-    return `[${batchNo}] ${typeLabel}硫化 - 开始于 ${record.startTime}`
+    const endTime = record.endTime || record.startTime
+    return `✓ [${batchNo}] ${typeLabel}硫化 - 已完成于 ${endTime}`
   }
 
   const handleInputChange = (field: keyof FormState, value: string) => {
@@ -207,6 +217,50 @@ export default function DemoldingPage() {
           />
         </div>
 
+        {runningBatches.length > 0 && (
+          <div className="mb-6 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-300 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <Flame className="w-5 h-5 text-orange-600 animate-pulse" />
+              <h3 className="text-lg font-semibold text-orange-800">
+                当前有 {runningBatches.length} 个批次正在硫化中，完成后可进行脱模
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {runningBatches.map((batch) => (
+                <div
+                  key={batch.id}
+                  className="flex items-center justify-between bg-white/80 rounded-lg px-4 py-2.5 border border-orange-200"
+                >
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => navigate(`/batch-detail?id=${batch.semiFinishedId}`)}
+                      className="text-sm font-semibold text-orange-700 hover:text-orange-900 hover:underline transition-colors"
+                    >
+                      {batch.batchNo}
+                    </button>
+                    <span className="text-sm text-slate-600">
+                      开始时间：{batch.startTime}
+                    </span>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      batch.type === 'plate'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}>
+                      {batch.type === 'plate' ? '平板硫化' : '罐式硫化'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/batch-detail?id=${batch.semiFinishedId}`)}
+                    className="text-xs text-orange-600 hover:text-orange-800 font-medium transition-colors"
+                  >
+                    查看详情 →
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <DataTable columns={columns} data={demolding} emptyText="暂无脱模修边记录" />
       </div>
 
@@ -258,6 +312,15 @@ export default function DemoldingPage() {
                       </option>
                     ))}
                   </select>
+                  {currentVulcanizationRecords.length > 0 ? (
+                    <p className="mt-1.5 text-xs text-emerald-600 font-medium">
+                      ✓ 有 {currentVulcanizationRecords.length} 个已完成的硫化批次可脱模
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-amber-600 font-medium">
+                      ⚠ 当前无可脱模批次（正在硫化的批次完成后会出现在这里）
+                    </p>
+                  )}
                 </div>
 
                 <div>

@@ -48,6 +48,15 @@ interface VulcanizationStore {
   getCompletedVulcanizationForDemolding: (type: 'plate' | 'tank') => (PlateVulcanization | TankVulcanization)[]
   getDemoldingForAppearance: () => Demolding[]
   getAppearanceForPhysical: () => AppearanceInspection[]
+  getFailedAppearanceForReference: () => AppearanceInspection[]
+  getSemiFinishedIdByAppearanceId: (appearanceId: string) => string | null
+  getRunningVulcanizationBatches: () => Array<{
+    id: string
+    semiFinishedId: string
+    batchNo: string
+    startTime: string
+    type: 'plate' | 'tank'
+  }>
   getBatchFlowStatus: () => Array<{
     batchNo: string
     semiFinishedId: string
@@ -261,6 +270,63 @@ export const useVulcanizationStore = create<VulcanizationStore>((set, get) => {
       const state = get()
       const usedIds = new Set(state.physicalInspection.map((p) => p.appearanceId))
       return state.appearanceInspection.filter((a) => !usedIds.has(a.id) && a.result === 'pass')
+    },
+
+    getFailedAppearanceForReference: () => {
+      const state = get()
+      const usedIds = new Set(state.physicalInspection.map((p) => p.appearanceId))
+      return state.appearanceInspection.filter((a) => !usedIds.has(a.id) && a.result === 'fail')
+    },
+
+    getSemiFinishedIdByAppearanceId: (appearanceId) => {
+      const state = get()
+      const appearance = state.appearanceInspection.find((a) => a.id === appearanceId)
+      if (!appearance) return null
+      const demold = state.demolding.find((d) => d.id === appearance.demoldingId)
+      if (!demold) return null
+      if (demold.vulcanizationType === 'plate') {
+        const vulc = state.plateVulcanization.find((p) => p.id === demold.vulcanizationId)
+        return vulc?.semiFinishedId ?? null
+      } else {
+        const vulc = state.tankVulcanization.find((t) => t.id === demold.vulcanizationId)
+        return vulc?.semiFinishedId ?? null
+      }
+    },
+
+    getRunningVulcanizationBatches: () => {
+      const state = get()
+      const result: Array<{
+        id: string
+        semiFinishedId: string
+        batchNo: string
+        startTime: string
+        type: 'plate' | 'tank'
+      }> = []
+      state.plateVulcanization
+        .filter((p) => p.status === 'running')
+        .forEach((p) => {
+          const sf = state.semiFinished.find((s) => s.id === p.semiFinishedId)
+          result.push({
+            id: p.id,
+            semiFinishedId: p.semiFinishedId,
+            batchNo: sf?.batchNo ?? '-',
+            startTime: p.startTime,
+            type: 'plate',
+          })
+        })
+      state.tankVulcanization
+        .filter((t) => t.status === 'running')
+        .forEach((t) => {
+          const sf = state.semiFinished.find((s) => s.id === t.semiFinishedId)
+          result.push({
+            id: t.id,
+            semiFinishedId: t.semiFinishedId,
+            batchNo: sf?.batchNo ?? '-',
+            startTime: t.startTime,
+            type: 'tank',
+          })
+        })
+      return result
     },
 
     getBatchFlowStatus: () => {

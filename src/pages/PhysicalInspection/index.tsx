@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Microscope, Plus, Activity, Gauge, Save, X, CheckCircle2, XCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Microscope, Plus, Activity, Gauge, Save, X, CheckCircle2, XCircle, AlertTriangle, Eye } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 import PageHeader from '@/components/Form/PageHeader'
 import DataTable, { type Column } from '@/components/Table/DataTable'
@@ -30,6 +31,7 @@ const HARDNESS_MIN = 60
 const HARDNESS_MAX = 75
 
 export default function PhysicalInspectionPage() {
+  const navigate = useNavigate()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formState, setFormState] = useState<FormState>(initialFormState)
   const physicalInspection = useVulcanizationStore((state) => state.physicalInspection)
@@ -37,6 +39,8 @@ export default function PhysicalInspectionPage() {
   const demolding = useVulcanizationStore((state) => state.demolding)
   const addPhysicalInspection = useVulcanizationStore((state) => state.addPhysicalInspection)
   const getAppearanceForPhysical = useVulcanizationStore((state) => state.getAppearanceForPhysical)
+  const getFailedAppearanceForReference = useVulcanizationStore((state) => state.getFailedAppearanceForReference)
+  const getSemiFinishedIdByAppearanceId = useVulcanizationStore((state) => state.getSemiFinishedIdByAppearanceId)
 
   const today = new Date().toLocaleDateString('zh-CN')
 
@@ -51,6 +55,14 @@ export default function PhysicalInspectionPage() {
   const hardnessPassCount = todayRecords.filter((item) => item.hardnessResult === 'pass').length
   const agingTestCompletedCount = todayRecords.filter((item) => item.agingTestResult.trim() !== '').length
 
+  const appearanceForPhysicalList = useMemo(() => {
+    return getAppearanceForPhysical()
+  }, [getAppearanceForPhysical])
+
+  const failedAppearanceList = useMemo(() => {
+    return getFailedAppearanceForReference()
+  }, [getFailedAppearanceForReference])
+
   const getProductNoByAppearanceId = (appearanceId: string): string => {
     const appearance = appearanceInspection.find((a) => a.id === appearanceId)
     if (!appearance) return '-'
@@ -62,6 +74,20 @@ export default function PhysicalInspectionPage() {
     const demold = demolding.find((d) => d.id === appearance.demoldingId)
     const productNo = demold?.productNo || '-'
     return `[${productNo}] 外观检验于 ${appearance.inspectTime}`
+  }
+
+  const getDefectReasons = (appearance: AppearanceInspection): string => {
+    const reasons: string[] = []
+    if (appearance.bubbleDefect && appearance.bubbleDefect.trim()) {
+      reasons.push(`气泡: ${appearance.bubbleDefect}`)
+    }
+    if (appearance.lackGlueDefect && appearance.lackGlueDefect.trim()) {
+      reasons.push(`缺胶: ${appearance.lackGlueDefect}`)
+    }
+    if (appearance.dimensionCheck && appearance.dimensionCheck.trim()) {
+      reasons.push(`尺寸: ${appearance.dimensionCheck}`)
+    }
+    return reasons.length > 0 ? reasons.join('；') : '未注明具体原因'
   }
 
   const hardnessChartData = useMemo(() => {
@@ -215,6 +241,53 @@ export default function PhysicalInspectionPage() {
           />
         </div>
 
+        {failedAppearanceList.length > 0 && (
+          <div className="mb-6 bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-800">
+                ⚠ 外观不合格批次（无需进入物性抽检）
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {failedAppearanceList.map((item) => {
+                const semiFinishedId = getSemiFinishedIdByAppearanceId(item.id)
+                const productNo = getProductNoByAppearanceId(item.id)
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-3 bg-white/80 rounded-lg px-4 py-3 border border-red-200"
+                  >
+                    <div className="flex flex-wrap items-center gap-4 flex-1">
+                      <span className="text-sm font-semibold text-slate-800">
+                        产品编号：{productNo}
+                      </span>
+                      <span className="text-sm text-slate-600">
+                        检验时间：{item.inspectTime}
+                      </span>
+                      <span className="text-sm text-red-700">
+                        不合格原因：{getDefectReasons(item)}
+                      </span>
+                      <span className="text-sm text-slate-600">
+                        质检员：{item.inspector}
+                      </span>
+                    </div>
+                    {semiFinishedId && (
+                      <button
+                        onClick={() => navigate(`/batch-detail?id=${semiFinishedId}`)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                        查看批次详情
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
           <div className="flex items-center gap-2 mb-4">
             <Gauge className="w-5 h-5 text-indigo-600" />
@@ -295,12 +368,24 @@ export default function PhysicalInspectionPage() {
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                   >
                     <option value="">请选择外观检验记录</option>
-                    {getAppearanceForPhysical().map((item) => (
+                    {appearanceForPhysicalList.map((item) => (
                       <option key={item.id} value={item.id}>
                         {getAppearanceLabel(item)}
                       </option>
                     ))}
                   </select>
+                  {appearanceForPhysicalList.length > 0 ? (
+                    <p className="mt-1.5 text-xs text-emerald-600 font-medium">
+                      ✓ 有 {appearanceForPhysicalList.length} 个外观合格批次待抽检
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-gray-500">
+                      当前无待抽检批次
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500 italic">
+                    说明：仅外观检验合格的批次可进入物性抽检。不合格批次已转入不合格品处理流程。
+                  </p>
                 </div>
 
                 <div>
