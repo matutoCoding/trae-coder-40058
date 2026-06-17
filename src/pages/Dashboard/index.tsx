@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Factory,
   LayoutDashboard,
+  Check,
 } from 'lucide-react'
 import {
   LineChart,
@@ -99,6 +100,10 @@ export default function Dashboard() {
     蒸汽: e.steam * 100,
     水费: e.water * 50,
   }))
+
+  const batchFlowList = store.getBatchFlowStatus()
+  const displayBatchList = batchFlowList.slice(0, 8)
+  const flowSteps = ['半成品接收', '硫化工序', '脱模修边', '外观检验', '物性抽检', '全部完成']
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -193,28 +198,117 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">在制状态看板</h3>
-            <span className="text-xs text-gray-500">各工序在制数量分布</span>
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">在制状态看板</h3>
+              <span className="text-xs text-gray-500">各工序在制数量分布</span>
+            </div>
+            <div className="space-y-4">
+              {processStatus.map((item) => (
+                <div key={item.name}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium text-gray-700">{item.name}</span>
+                    <span className="text-sm text-gray-500">
+                      {item.count} / {item.total}
+                    </span>
+                  </div>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${item.color} rounded-full transition-all duration-500`}
+                      style={{ width: `${(item.count / item.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-4">
-            {processStatus.map((item) => (
-              <div key={item.name}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium text-gray-700">{item.name}</span>
-                  <span className="text-sm text-gray-500">
-                    {item.count} / {item.total}
-                  </span>
-                </div>
-                <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${item.color} rounded-full transition-all duration-500`}
-                    style={{ width: `${(item.count / item.total) * 100}%` }}
-                  />
-                </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">批次流转追踪</h3>
+                <span className="text-xs text-gray-500">实时追踪各批次当前工序进度</span>
               </div>
-            ))}
+              {batchFlowList.length > 8 && (
+                <NavLink to="/dashboard" className="text-xs text-[#1e3a5f] hover:underline">
+                  查看全部 {batchFlowList.length} 个批次
+                </NavLink>
+              )}
+            </div>
+            {displayBatchList.length === 0 ? (
+              <div className="text-center py-10 text-gray-400 text-sm">暂无批次流转数据</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {displayBatchList.map((batch) => (
+                  <div
+                    key={batch.semiFinishedId}
+                    className="border border-gray-200 rounded-lg p-4 hover:border-[#1e3a5f]/30 hover:shadow-sm transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-semibold text-gray-800 text-sm">{batch.batchNo}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                          batch.stepIndex === 5
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}
+                      >
+                        {batch.currentStep}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mb-3">更新于 {batch.timestamp}</div>
+                    <div className="relative">
+                      {flowSteps.map((step, idx) => {
+                        const isCompleted = idx <= batch.stepIndex
+                        const isCurrent = idx === batch.stepIndex + 1 && batch.stepIndex !== 5
+                        return (
+                          <div key={step} className="flex items-start gap-3 mb-2 last:mb-0">
+                            <div className="relative flex flex-col items-center">
+                              <div
+                                className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
+                                  isCompleted
+                                    ? 'bg-emerald-500 text-white'
+                                    : isCurrent
+                                    ? 'bg-blue-500 ring-4 ring-blue-100'
+                                    : 'bg-gray-300'
+                                }`}
+                              >
+                                {isCompleted && <Check className="w-3 h-3" />}
+                                {isCurrent && (
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                                  </span>
+                                )}
+                              </div>
+                              {idx < flowSteps.length - 1 && (
+                                <div
+                                  className={`w-0.5 h-4 mt-0.5 ${
+                                    idx < batch.stepIndex ? 'bg-emerald-500' : 'bg-gray-200'
+                                  }`}
+                                />
+                              )}
+                            </div>
+                            <span
+                              className={`text-xs leading-5 ${
+                                isCompleted
+                                  ? 'text-emerald-700 font-medium'
+                                  : isCurrent
+                                  ? 'text-blue-700 font-medium'
+                                  : 'text-gray-400'
+                              }`}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

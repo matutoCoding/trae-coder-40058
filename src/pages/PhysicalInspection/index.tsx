@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react'
 import { Microscope, Plus, Activity, Gauge, Save, X, CheckCircle2, XCircle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
-import PageHeader from '../../components/Form/PageHeader'
-import DataTable, { type Column } from '../../components/Table/DataTable'
-import StatCard from '../../components/Card/StatCard'
-import StatusBadge from '../../components/Card/StatusBadge'
-import { useVulcanizationStore } from '../../store'
-import type { PhysicalInspection, AppearanceInspection, Demolding } from '../../types'
+import PageHeader from '@/components/Form/PageHeader'
+import DataTable, { type Column } from '@/components/Table/DataTable'
+import StatCard from '@/components/Card/StatCard'
+import StatusBadge from '@/components/Card/StatusBadge'
+import { useVulcanizationStore } from '@/store'
+import type { PhysicalInspection, AppearanceInspection } from '@/types'
 
 interface FormState {
   appearanceId: string
@@ -36,6 +36,7 @@ export default function PhysicalInspectionPage() {
   const appearanceInspection = useVulcanizationStore((state) => state.appearanceInspection)
   const demolding = useVulcanizationStore((state) => state.demolding)
   const addPhysicalInspection = useVulcanizationStore((state) => state.addPhysicalInspection)
+  const getAppearanceForPhysical = useVulcanizationStore((state) => state.getAppearanceForPhysical)
 
   const today = new Date().toLocaleDateString('zh-CN')
 
@@ -58,8 +59,9 @@ export default function PhysicalInspectionPage() {
   }
 
   const getAppearanceLabel = (appearance: AppearanceInspection) => {
-    const productNo = getProductNoByAppearanceId(appearance.id)
-    return `${appearance.id} - 产品编号: ${productNo}`
+    const demold = demolding.find((d) => d.id === appearance.demoldingId)
+    const productNo = demold?.productNo || '-'
+    return `[${productNo}] 外观检验于 ${appearance.inspectTime}`
   }
 
   const hardnessChartData = useMemo(() => {
@@ -293,7 +295,7 @@ export default function PhysicalInspectionPage() {
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                   >
                     <option value="">请选择外观检验记录</option>
-                    {appearanceInspection.map((item) => (
+                    {getAppearanceForPhysical().map((item) => (
                       <option key={item.id} value={item.id}>
                         {getAppearanceLabel(item)}
                       </option>

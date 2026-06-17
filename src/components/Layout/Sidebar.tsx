@@ -12,7 +12,6 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { useState } from 'react'
 
 const navItems = [
   { path: '/dashboard', label: '工作台', icon: LayoutDashboard },

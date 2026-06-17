@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Container, Plus, Gauge, Thermometer, Play, Save, X, Clock } from 'lucide-react'
-import PageHeader from '../../components/Form/PageHeader'
-import DataTable, { type Column } from '../../components/Table/DataTable'
-import StatusBadge from '../../components/Card/StatusBadge'
-import StatCard from '../../components/Card/StatCard'
-import { useVulcanizationStore } from '../../store'
-import type { TankVulcanization } from '../../types'
+import PageHeader from '@/components/Form/PageHeader'
+import DataTable, { type Column } from '@/components/Table/DataTable'
+import StatusBadge from '@/components/Card/StatusBadge'
+import StatCard from '@/components/Card/StatCard'
+import { useVulcanizationStore } from '@/store'
+import type { TankVulcanization, SemiFinished } from '@/types'
 
 interface FormState {
   semiFinishedId: string
@@ -46,6 +46,10 @@ export default function TankVulcanizationPage() {
   const semiFinished = useVulcanizationStore((state) => state.semiFinished)
   const addTankVulcanization = useVulcanizationStore((state) => state.addTankVulcanization)
   const updateTankVulcanization = useVulcanizationStore((state) => state.updateTankVulcanization)
+  const getAvailableSemiFinishedForVulcanization = useVulcanizationStore(
+    (state) => state.getAvailableSemiFinishedForVulcanization
+  )
+  const availableSemiFinished = getAvailableSemiFinishedForVulcanization()
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -290,6 +294,9 @@ export default function TankVulcanizationPage() {
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
                     半成品批次 <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs font-normal text-emerald-600">
+                      剩余可用: {availableSemiFinished.length} 批
+                    </span>
                   </label>
                   <select
                     value={formState.semiFinishedId}
@@ -297,7 +304,7 @@ export default function TankVulcanizationPage() {
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                   >
                     <option value="">请选择半成品批次</option>
-                    {semiFinished.map((sf) => (
+                    {availableSemiFinished.map((sf: SemiFinished) => (
                       <option key={sf.id} value={sf.id}>
                         {sf.batchNo} - {sf.rubberType}
                       </option>

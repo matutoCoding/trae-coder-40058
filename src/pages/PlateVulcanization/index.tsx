@@ -20,12 +20,12 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import PageHeader from '../../components/Form/PageHeader'
-import StatCard from '../../components/Card/StatCard'
-import StatusBadge from '../../components/Card/StatusBadge'
-import DataTable, { type Column } from '../../components/Table/DataTable'
-import { useVulcanizationStore } from '../../store'
-import type { PlateVulcanization, SemiFinished, Mold } from '../../types'
+import PageHeader from '@/components/Form/PageHeader'
+import StatCard from '@/components/Card/StatCard'
+import StatusBadge from '@/components/Card/StatusBadge'
+import DataTable, { type Column } from '@/components/Table/DataTable'
+import { useVulcanizationStore } from '@/store'
+import type { PlateVulcanization, SemiFinished, Mold } from '@/types'
 
 interface FormState {
   semiFinishedId: string
@@ -84,7 +84,10 @@ export default function PlateVulcanizationPage() {
   const molds = useVulcanizationStore((state) => state.molds)
   const addPlateVulcanization = useVulcanizationStore((state) => state.addPlateVulcanization)
   const updatePlateVulcanization = useVulcanizationStore((state) => state.updatePlateVulcanization)
-  const updateMoldStatus = useVulcanizationStore((state) => state.updateMoldStatus)
+  const getAvailableSemiFinishedForVulcanization = useVulcanizationStore(
+    (state) => state.getAvailableSemiFinishedForVulcanization
+  )
+  const availableSemiFinished = getAvailableSemiFinishedForVulcanization()
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -152,7 +155,6 @@ export default function PlateVulcanizationPage() {
     }
 
     addPlateVulcanization(newRecord)
-    updateMoldStatus(formState.moldId, 'in-use', formState.operator)
     setFormState(initialFormState)
     setIsModalOpen(false)
   }
@@ -168,7 +170,6 @@ export default function PlateVulcanizationPage() {
         status: 'completed',
         endTime: new Date().toLocaleString('zh-CN'),
       })
-      updateMoldStatus(record.moldId, 'available')
     }
   }
 
@@ -429,6 +430,9 @@ export default function PlateVulcanizationPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
                     半成品批次 <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs font-normal text-emerald-600">
+                      剩余可用: {availableSemiFinished.length} 批
+                    </span>
                   </label>
                   <select
                     value={formState.semiFinishedId}
@@ -436,7 +440,7 @@ export default function PlateVulcanizationPage() {
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
                   >
                     <option value="">请选择半成品批次</option>
-                    {semiFinished.map((sf: SemiFinished) => (
+                    {availableSemiFinished.map((sf: SemiFinished) => (
                       <option key={sf.id} value={sf.id}>
                         {sf.batchNo} - {sf.rubberType}
                       </option>

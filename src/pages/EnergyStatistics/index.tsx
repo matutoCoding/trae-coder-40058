@@ -48,6 +48,16 @@ interface FormState {
   water: string
 }
 
+interface AggregatedData {
+  id?: string
+  statDate: string
+  electricity: number
+  steam: number
+  water: number
+  totalCost: number
+  sortKey: string
+}
+
 const initialFormState: FormState = {
   statDate: new Date().toISOString().slice(0, 10),
   electricity: '',
@@ -59,6 +69,115 @@ const calculateTotalCost = (electricity: number, steam: number, water: number) =
   return electricity * ELECTRICITY_PRICE + steam * STEAM_PRICE + water * WATER_PRICE
 }
 
+const padZero = (n: number) => (n < 10 ? `0${n}` : `${n}`)
+
+const getISOWeekInfo = (dateStr: string) => {
+  const date = new Date(dateStr)
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  const weekNum = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  const year = d.getUTCFullYear()
+
+  const monday = new Date(date)
+  const currentDay = monday.getDay() || 7
+  monday.setDate(monday.getDate() - currentDay + 1)
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+
+  const weekLabel = `${year}年第${weekNum}周 (${monday.getMonth() + 1}/${monday.getDate()}-${sunday.getMonth() + 1}/${sunday.getDate()})`
+  const sortKey = `${year}-W${padZero(weekNum)}`
+
+  return { year, weekNum, weekLabel, sortKey }
+}
+
+const getMonthInfo = (dateStr: string) => {
+  const d = new Date(dateStr)
+  const year = d.getFullYear()
+  const month = d.getMonth() + 1
+  const monthLabel = `${year}年${month}月`
+  const sortKey = `${year}-${padZero(month)}`
+  return { year, month, monthLabel, sortKey }
+}
+
+const aggregateData = (
+  rawData: EnergyStatistics[],
+  period: PeriodType
+): AggregatedData[] => {
+  if (rawData.length === 0) return []
+
+  const sorted = [...rawData].sort(
+    (a, b) => new Date(a.statDate).getTime() - new Date(b.statDate).getTime()
+  )
+
+  if (period === 'day') {
+    return sorted.slice(-7).map((item) => ({
+      statDate: item.statDate,
+      electricity: Number(item.electricity.toFixed(1)),
+      steam: Number(item.steam.toFixed(1)),
+      water: Number(item.water.toFixed(1)),
+      totalCost: Number(item.totalCost.toFixed(1)),
+      sortKey: item.statDate,
+    }))
+  }
+
+  const groups = new Map<string, AggregatedData>()
+
+  for (const item of sorted) {
+    let key: string
+    let label: string
+
+    if (period === 'week') {
+      const info = getISOWeekInfo(item.statDate)
+      key = info.sortKey
+      label = info.weekLabel
+    } else {
+      const info = getMonthInfo(item.statDate)
+      key = info.sortKey
+      label = info.monthLabel
+    }
+
+    const existing = groups.get(key)
+    if (existing) {
+      existing.electricity += item.electricity
+      existing.steam += item.steam
+      existing.water += item.water
+      existing.totalCost += item.totalCost
+    } else {
+      groups.set(key, {
+        statDate: label,
+        electricity: item.electricity,
+        steam: item.steam,
+        water: item.water,
+        totalCost: item.totalCost,
+        sortKey: key,
+      })
+    }
+  }
+
+  const result = Array.from(groups.values()).map((item) => ({
+    ...item,
+    electricity: Number(item.electricity.toFixed(1)),
+    steam: Number(item.steam.toFixed(1)),
+    water: Number(item.water.toFixed(1)),
+    totalCost: Number(item.totalCost.toFixed(1)),
+  }))
+
+  return result.sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+}
+
+const getPeriodTitle = (period: PeriodType) => {
+  switch (period) {
+    case 'day':
+      return { card: '今日', trend: '较昨日' }
+    case 'week':
+      return { card: '本周', trend: '较上周' }
+    case 'month':
+      return { card: '本月', trend: '较上月' }
+  }
+}
+
 export default function EnergyStatisticsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formState, setFormState] = useState<FormState>(initialFormState)
@@ -67,62 +186,85 @@ export default function EnergyStatisticsPage() {
   const energyStatistics = useVulcanizationStore((state) => state.energyStatistics)
   const addEnergyStatistics = useVulcanizationStore((state) => state.addEnergyStatistics)
 
-  const todayData = useMemo(() => {
-    if (energyStatistics.length === 0) return null
-    return energyStatistics[energyStatistics.length - 1]
-  }, [energyStatistics])
+  const aggregatedData = useMemo(
+    () => aggregateData(energyStatistics, period),
+    [energyStatistics, period]
+  )
 
-  const yesterdayData = useMemo(() => {
-    if (energyStatistics.length < 2) return null
-    return energyStatistics[energyStatistics.length - 2]
-  }, [energyStatistics])
+  const sortedAggregated = useMemo(
+    () => [...aggregatedData].sort((a, b) => b.sortKey.localeCompare(a.sortKey)),
+    [aggregatedData]
+  )
 
-  const calcTrend = (today: number | undefined, yesterday: number | undefined) => {
-    if (!today || !yesterday || yesterday === 0) return undefined
-    return Number((((today - yesterday) / yesterday) * 100).toFixed(1))
+  const currentPeriodData = useMemo(() => {
+    if (aggregatedData.length === 0) return null
+    return aggregatedData[aggregatedData.length - 1]
+  }, [aggregatedData])
+
+  const previousPeriodData = useMemo(() => {
+    if (aggregatedData.length < 2) return null
+    return aggregatedData[aggregatedData.length - 2]
+  }, [aggregatedData])
+
+  const calcTrend = (
+    current: number | undefined,
+    previous: number | undefined
+  ): number | undefined => {
+    if (!current || !previous || previous === 0) return undefined
+    return Number((((current - previous) / previous) * 100).toFixed(1))
   }
 
   const trendData = useMemo(() => {
-    const sorted = [...energyStatistics].sort(
-      (a, b) => new Date(a.statDate).getTime() - new Date(b.statDate).getTime()
-    )
-    return sorted.slice(-7).map((e) => ({
-      date: e.statDate.slice(5),
+    return aggregatedData.map((e) => ({
+      date: e.statDate,
       电耗: e.electricity,
       蒸汽耗: e.steam,
       水耗: e.water,
     }))
-  }, [energyStatistics])
+  }, [aggregatedData])
 
   const pieData = useMemo(() => {
-    const totalElectricityCost = energyStatistics.reduce((sum, e) => sum + e.electricity * ELECTRICITY_PRICE, 0)
-    const totalSteamCost = energyStatistics.reduce((sum, e) => sum + e.steam * STEAM_PRICE, 0)
-    const totalWaterCost = energyStatistics.reduce((sum, e) => sum + e.water * WATER_PRICE, 0)
+    const totalElectricityCost = aggregatedData.reduce(
+      (sum, e) => sum + e.electricity * ELECTRICITY_PRICE,
+      0
+    )
+    const totalSteamCost = aggregatedData.reduce(
+      (sum, e) => sum + e.steam * STEAM_PRICE,
+      0
+    )
+    const totalWaterCost = aggregatedData.reduce(
+      (sum, e) => sum + e.water * WATER_PRICE,
+      0
+    )
     return [
       { name: '电费', value: Number(totalElectricityCost.toFixed(2)) },
       { name: '蒸汽费', value: Number(totalSteamCost.toFixed(2)) },
       { name: '水费', value: Number(totalWaterCost.toFixed(2)) },
     ]
-  }, [energyStatistics])
+  }, [aggregatedData])
 
   const barData = useMemo(() => {
-    const sorted = [...energyStatistics].sort(
-      (a, b) => new Date(a.statDate).getTime() - new Date(b.statDate).getTime()
-    )
-    return sorted.slice(-7).map((e) => ({
-      date: e.statDate.slice(5),
+    return aggregatedData.map((e) => ({
+      date: e.statDate,
       电费: Number((e.electricity * ELECTRICITY_PRICE).toFixed(2)),
       蒸汽费: Number((e.steam * STEAM_PRICE).toFixed(2)),
       水费: Number((e.water * WATER_PRICE).toFixed(2)),
     }))
-  }, [energyStatistics])
+  }, [aggregatedData])
+
+  const periodTitle = getPeriodTitle(period)
 
   const handleInputChange = (field: keyof FormState, value: string) => {
     setFormState((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleSubmit = () => {
-    if (!formState.statDate || !formState.electricity || !formState.steam || !formState.water) {
+    if (
+      !formState.statDate ||
+      !formState.electricity ||
+      !formState.steam ||
+      !formState.water
+    ) {
       alert('请填写所有必填项')
       return
     }
@@ -150,9 +292,26 @@ export default function EnergyStatisticsPage() {
     setIsModalOpen(false)
   }
 
+  const getExportFileName = () => {
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = padZero(now.getMonth() + 1)
+    const d = padZero(now.getDate())
+
+    if (period === 'day') {
+      return `能耗报表_日_${y}${m}${d}.csv`
+    } else if (period === 'week') {
+      const info = getISOWeekInfo(now.toISOString().slice(0, 10))
+      return `能耗报表_周_${y}W${padZero(info.weekNum)}.csv`
+    } else {
+      return `能耗报表_月_${y}${m}.csv`
+    }
+  }
+
   const handleExport = () => {
-    const header = '统计日期,电耗(kWh),蒸汽耗(t),水耗(t),电费(元),蒸汽费(元),水费(元),总费用(元)\n'
-    const rows = energyStatistics
+    const header =
+      '统计日期,电耗(kWh),蒸汽耗(t),水耗(t),电费(元),蒸汽费(元),水费(元),总费用(元)\n'
+    const rows = sortedAggregated
       .map((e) => {
         const ec = (e.electricity * ELECTRICITY_PRICE).toFixed(2)
         const sc = (e.steam * STEAM_PRICE).toFixed(2)
@@ -165,7 +324,7 @@ export default function EnergyStatisticsPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `能耗统计报表_${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = getExportFileName()
     link.click()
     URL.revokeObjectURL(url)
     alert('报表导出成功！')
@@ -178,28 +337,36 @@ export default function EnergyStatisticsPage() {
     return calculateTotalCost(e, s, w).toFixed(2)
   }, [formState])
 
-  const columns: Column<EnergyStatistics>[] = [
-    { key: 'statDate', title: '统计日期', width: '140px', align: 'center' },
+  const columns: Column<AggregatedData>[] = [
+    { key: 'statDate', title: '统计周期', width: '180px', align: 'center' },
     {
       key: 'electricity',
       title: '电耗(kWh)',
       width: '140px',
       align: 'right',
-      render: (row) => <span className="text-[#1e3a5f] font-medium">{row.electricity}</span>,
+      render: (row) => (
+        <span className="text-[#1e3a5f] font-medium">
+          {row.electricity.toFixed(1)}
+        </span>
+      ),
     },
     {
       key: 'steam',
       title: '蒸汽耗(t)',
       width: '140px',
       align: 'right',
-      render: (row) => <span className="text-[#e85d26] font-medium">{row.steam}</span>,
+      render: (row) => (
+        <span className="text-[#e85d26] font-medium">{row.steam.toFixed(1)}</span>
+      ),
     },
     {
       key: 'water',
       title: '水耗(t)',
       width: '140px',
       align: 'right',
-      render: (row) => <span className="text-[#2e8b57] font-medium">{row.water}</span>,
+      render: (row) => (
+        <span className="text-[#2e8b57] font-medium">{row.water.toFixed(1)}</span>
+      ),
     },
     {
       key: 'totalCost',
@@ -217,6 +384,13 @@ export default function EnergyStatisticsPage() {
     { key: 'week', label: '周' },
     { key: 'month', label: '月' },
   ]
+
+  const chartSubtitle =
+    period === 'day'
+      ? '最近7天'
+      : period === 'week'
+      ? `共${aggregatedData.length}周`
+      : `共${aggregatedData.length}月`
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -261,39 +435,39 @@ export default function EnergyStatisticsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            title="今日电耗"
-            value={todayData?.electricity ?? 0}
+            title={`${periodTitle.card}电耗`}
+            value={Number(currentPeriodData?.electricity.toFixed(1) ?? 0)}
             unit="kWh"
             icon={Zap}
-            trend={calcTrend(todayData?.electricity, yesterdayData?.electricity)}
-            trendLabel="较昨日"
+            trend={calcTrend(currentPeriodData?.electricity, previousPeriodData?.electricity)}
+            trendLabel={periodTitle.trend}
             color="blue"
           />
           <StatCard
-            title="今日蒸汽耗"
-            value={todayData?.steam ?? 0}
+            title={`${periodTitle.card}蒸汽耗`}
+            value={Number(currentPeriodData?.steam.toFixed(1) ?? 0)}
             unit="t"
             icon={Flame}
-            trend={calcTrend(todayData?.steam, yesterdayData?.steam)}
-            trendLabel="较昨日"
+            trend={calcTrend(currentPeriodData?.steam, previousPeriodData?.steam)}
+            trendLabel={periodTitle.trend}
             color="orange"
           />
           <StatCard
-            title="今日水耗"
-            value={todayData?.water ?? 0}
+            title={`${periodTitle.card}水耗`}
+            value={Number(currentPeriodData?.water.toFixed(1) ?? 0)}
             unit="t"
             icon={Droplets}
-            trend={calcTrend(todayData?.water, yesterdayData?.water)}
-            trendLabel="较昨日"
+            trend={calcTrend(currentPeriodData?.water, previousPeriodData?.water)}
+            trendLabel={periodTitle.trend}
             color="green"
           />
           <StatCard
-            title="今日总能耗"
-            value={todayData?.totalCost ?? 0}
+            title={`${periodTitle.card}总能耗`}
+            value={Number(currentPeriodData?.totalCost.toFixed(2) ?? 0)}
             unit="元"
             icon={DollarSign}
-            trend={calcTrend(todayData?.totalCost, yesterdayData?.totalCost)}
-            trendLabel="较昨日"
+            trend={calcTrend(currentPeriodData?.totalCost, previousPeriodData?.totalCost)}
+            trendLabel={periodTitle.trend}
             color="purple"
           />
         </div>
@@ -305,13 +479,18 @@ export default function EnergyStatisticsPage() {
                 <TrendingUp className="w-5 h-5 text-[#1e3a5f]" />
                 <h3 className="text-lg font-semibold text-gray-800">能耗趋势</h3>
               </div>
-              <span className="text-xs text-gray-500">最近7天</span>
+              <span className="text-xs text-gray-500">{chartSubtitle}</span>
             </div>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#6b7280' }} stroke="#d1d5db" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 12, fill: '#6b7280' }}
+                    stroke="#d1d5db"
+                    interval={period === 'month' ? 0 : 'preserveStartEnd'}
+                  />
                   <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} stroke="#d1d5db" />
                   <Tooltip
                     contentStyle={{
@@ -394,14 +573,19 @@ export default function EnergyStatisticsPage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="w-5 h-5 text-[#1e3a5f]" />
-            <h3 className="text-lg font-semibold text-gray-800">日均能耗费用对比</h3>
-            <span className="text-xs text-gray-500 ml-2">最近7天</span>
+            <h3 className="text-lg font-semibold text-gray-800">能耗费用对比</h3>
+            <span className="text-xs text-gray-500 ml-2">{chartSubtitle}</span>
           </div>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#6b7280' }} stroke="#d1d5db" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 12, fill: '#6b7280' }}
+                  stroke="#d1d5db"
+                  interval={period === 'month' ? 0 : 'preserveStartEnd'}
+                />
                 <YAxis
                   tick={{ fontSize: 12, fill: '#6b7280' }}
                   stroke="#d1d5db"
@@ -427,7 +611,11 @@ export default function EnergyStatisticsPage() {
 
         <div>
           <h3 className="text-lg font-semibold text-gray-800 mb-4">能耗记录列表</h3>
-          <DataTable columns={columns} data={energyStatistics} emptyText="暂无能耗记录" />
+          <DataTable
+            columns={columns}
+            data={sortedAggregated}
+            emptyText="暂无能耗记录"
+          />
         </div>
       </div>
 

@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react'
 import { Eye, Plus, CheckCircle2, XCircle, Save, X, AlertCircle } from 'lucide-react'
-import PageHeader from '../../components/Form/PageHeader'
-import DataTable, { type Column } from '../../components/Table/DataTable'
-import StatCard from '../../components/Card/StatCard'
-import StatusBadge from '../../components/Card/StatusBadge'
-import { useVulcanizationStore } from '../../store'
-import type { AppearanceInspection, Demolding } from '../../types'
+import PageHeader from '@/components/Form/PageHeader'
+import DataTable, { type Column } from '@/components/Table/DataTable'
+import StatCard from '@/components/Card/StatCard'
+import StatusBadge from '@/components/Card/StatusBadge'
+import { useVulcanizationStore } from '@/store'
+import type { AppearanceInspection, Demolding } from '@/types'
 
 const RESULT_OPTIONS = [
   { value: 'pass', label: '合格' },
@@ -36,6 +36,7 @@ export default function AppearanceInspectionPage() {
   const appearanceInspection = useVulcanizationStore((state) => state.appearanceInspection)
   const demolding = useVulcanizationStore((state) => state.demolding)
   const addAppearanceInspection = useVulcanizationStore((state) => state.addAppearanceInspection)
+  const getDemoldingForAppearance = useVulcanizationStore((state) => state.getDemoldingForAppearance)
 
   const today = new Date().toLocaleDateString('zh-CN')
 
@@ -56,7 +57,7 @@ export default function AppearanceInspectionPage() {
   }
 
   const getDemoldingLabel = (record: Demolding) => {
-    return `${record.productNo} - ${record.createTime}`
+    return `[${record.productNo}] 记录于 ${record.createTime}`
   }
 
   const handleInputChange = (field: keyof FormState, value: string) => {
@@ -233,7 +234,7 @@ export default function AppearanceInspectionPage() {
                     className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
                   >
                     <option value="">请选择脱模记录</option>
-                    {demolding.map((record) => (
+                    {getDemoldingForAppearance().map((record) => (
                       <option key={record.id} value={record.id}>
                         {getDemoldingLabel(record)}
                       </option>

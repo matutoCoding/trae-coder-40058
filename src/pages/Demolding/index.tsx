@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
 import { Scissors, Plus, CheckCircle2, XCircle, Percent, Save, X } from 'lucide-react'
-import PageHeader from '../../components/Form/PageHeader'
-import DataTable, { type Column } from '../../components/Table/DataTable'
-import StatCard from '../../components/Card/StatCard'
-import { useVulcanizationStore } from '../../store'
-import type { Demolding, PlateVulcanization, TankVulcanization } from '../../types'
+import PageHeader from '@/components/Form/PageHeader'
+import DataTable, { type Column } from '@/components/Table/DataTable'
+import StatCard from '@/components/Card/StatCard'
+import { useVulcanizationStore } from '@/store'
+import type { Demolding, PlateVulcanization, TankVulcanization } from '@/types'
 
 const VULCANIZATION_TYPE_OPTIONS = [
   { value: 'plate', label: '平板硫化' },
@@ -35,9 +35,11 @@ export default function DemoldingPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formState, setFormState] = useState<FormState>(initialFormState)
   const demolding = useVulcanizationStore((state) => state.demolding)
-  const plateVulcanization = useVulcanizationStore((state) => state.plateVulcanization)
-  const tankVulcanization = useVulcanizationStore((state) => state.tankVulcanization)
+  const semiFinished = useVulcanizationStore((state) => state.semiFinished)
   const addDemolding = useVulcanizationStore((state) => state.addDemolding)
+  const getCompletedVulcanizationForDemolding = useVulcanizationStore(
+    (state) => state.getCompletedVulcanizationForDemolding
+  )
 
   const today = new Date().toLocaleDateString('zh-CN')
 
@@ -55,22 +57,19 @@ export default function DemoldingPage() {
     ? ((totalQualified / (totalQualified + totalDefective)) * 100).toFixed(1)
     : '0.0'
 
-  const completedPlateRecords = useMemo(() => {
-    return plateVulcanization.filter((item) => item.status === 'completed')
-  }, [plateVulcanization])
-
-  const completedTankRecords = useMemo(() => {
-    return tankVulcanization.filter((item) => item.status === 'completed')
-  }, [tankVulcanization])
-
   const currentVulcanizationRecords = useMemo(() => {
-    return formState.vulcanizationType === 'plate'
-      ? completedPlateRecords
-      : completedTankRecords
-  }, [formState.vulcanizationType, completedPlateRecords, completedTankRecords])
+    return getCompletedVulcanizationForDemolding(formState.vulcanizationType)
+  }, [formState.vulcanizationType, getCompletedVulcanizationForDemolding])
+
+  const getBatchNoById = (id: string) => {
+    const sf = semiFinished.find((s) => s.id === id)
+    return sf ? sf.batchNo : '-'
+  }
 
   const getVulcanizationLabel = (record: PlateVulcanization | TankVulcanization) => {
-    return `${record.id} - ${record.startTime}`
+    const batchNo = getBatchNoById(record.semiFinishedId)
+    const typeLabel = formState.vulcanizationType === 'plate' ? '平板' : '罐式'
+    return `[${batchNo}] ${typeLabel}硫化 - 开始于 ${record.startTime}`
   }
 
   const handleInputChange = (field: keyof FormState, value: string) => {
